@@ -564,27 +564,50 @@ private:
     }
 
     void createVertexBuffer() {
-        vk::BufferCreateInfo bufferInfo = {
-            .size = sizeof(vertices[0]) * vertices.size(),
-            .usage = vk::BufferUsageFlagBits::eVertexBuffer,
-            .sharingMode = vk::SharingMode::eExclusive,
-        };
-        m_VertexBuffer = vk::raii::Buffer(m_Device, bufferInfo);
+        vk::DeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
 
-        // using eHostCoherent to make sure the mapped memory always matches the  contents of the allocated memory
-        vk::MemoryRequirements memRequirements = m_VertexBuffer.getMemoryRequirements();
-        vk::MemoryAllocateInfo memoryAllocateInfo = {
-            .allocationSize = memRequirements.size,
-            .memoryTypeIndex = findMemoryType(
-                memRequirements.memoryTypeBits,
-                vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
-                )
+        vk::raii::Buffer stagingBuffer = nullptr;
+        vk::raii::DeviceMemory stagingBufferMemory = nullptr;
+        // Host visible buffer for staging
+        createBuffer(
+            bufferSize,
+            vk::BufferUsageFlagBits::eTransferSrc,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+            stagingBuffer,
+            stagingBufferMemory
+        );
+        void * dataStaging = stagingBufferMemory.mapMemory(0, bufferSize);
+        memcpy(dataStaging, vertices.data(), bufferSize);
+        stagingBufferMemory.unmapMemory();
+
+        // Device local buffer as actual buffer
+        createBuffer(
+            bufferSize,
+            vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+            vk::MemoryPropertyFlagBits::eDeviceLocal,
+            m_VertexBuffer,
+            m_VertexBufferMemory
+        );
+
+        // Cannot map memory of a device local buffer using vkMapMemory so we copy from the staging buffer instead
+        copyBuffer(stagingBuffer, m_VertexBuffer, bufferSize);
+    }
+
+    void createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties,
+                      vk::raii::Buffer &buffer, vk::raii::DeviceMemory &bufferMemory) {
+        vk::BufferCreateInfo bufferInfo = {
+            .size = size,
+            .usage = usage,
+            .sharingMode = vk::SharingMode::eExclusive
         };
-        m_VertexBufferMemory = vk::raii::DeviceMemory(m_Device, memoryAllocateInfo);
-        m_VertexBuffer.bindMemory(*m_VertexBufferMemory, 0);
-        void * data = m_VertexBufferMemory.mapMemory(0, bufferInfo.size);
-        memcpy(data, vertices.data(), bufferInfo.size);
-        m_VertexBufferMemory.unmapMemory();
+        buffer = vk::raii::Buffer(m_Device, bufferInfo);
+        vk::MemoryRequirements memRequirements = buffer.getMemoryRequirements();
+        vk::MemoryAllocateInfo allocInfo = {
+            .allocationSize = memRequirements.size,
+            .memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties)
+        };
+        bufferMemory = vk::raii::DeviceMemory(m_Device, allocInfo);
+        buffer.bindMemory(*bufferMemory, 0);
     }
 
     uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) {
@@ -597,6 +620,23 @@ private:
         }
 
         throw std::runtime_error("Failed to find suitable memory type!");
+    }
+
+    void copyBuffer(vk::raii::Buffer & srcBuffer, vk::raii::Buffer & dstBuffer, vk::DeviceSize size) {
+        vk::CommandBufferAllocateInfo allocInfo = {
+            .commandPool = m_CommandPool,
+            .level = vk::CommandBufferLevel::ePrimary,
+            .commandBufferCount = 1
+        };
+        vk::raii::CommandBuffer commandCopyBuffer = std::move(m_Device.allocateCommandBuffers(allocInfo).front());
+        commandCopyBuffer.begin(vk::CommandBufferBeginInfo { .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
+        commandCopyBuffer.copyBuffer(srcBuffer, dstBuffer, vk::BufferCopy(0, 0, size));
+        commandCopyBuffer.end();
+
+        m_GraphicsQueue.submit(vk::SubmitInfo { .commandBufferCount = 1, .pCommandBuffers = &*commandCopyBuffer }, nullptr);
+        // using a fence instead of waitIdle() would allow us to schedule multiple transfer simultaneously and
+        // wait for all of them to complete instead of executing one at a time. ( = likely better optimization)
+        m_GraphicsQueue.waitIdle();
     }
 
     void createCommandBuffers() {
