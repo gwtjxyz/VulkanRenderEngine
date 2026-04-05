@@ -48,9 +48,14 @@ struct Vertex {
 };
 
 const std::vector<Vertex> vertices = {
-    {{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-    {{0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}},
-    {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+    {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+    {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+    {{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+    {{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
+};
+
+const std::vector<uint16_t> indices = {
+    0, 1, 2, 2, 3, 0
 };
 
 static std::filesystem::path pathFromProjectDir(const std::string & relativePath) {
@@ -116,6 +121,7 @@ private:
         createGraphicsPipeline();
         createCommandPool();
         createVertexBuffer();
+        createIndexBuffer();
         createCommandBuffers();
         createSyncObjects();
     }
@@ -639,6 +645,34 @@ private:
         m_GraphicsQueue.waitIdle();
     }
 
+    void createIndexBuffer() {
+        vk::DeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+
+        vk::raii::Buffer stagingBuffer({});
+        vk::raii::DeviceMemory stagingBufferMemory({});
+        createBuffer(
+            bufferSize,
+            vk::BufferUsageFlagBits::eTransferSrc,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+            stagingBuffer,
+            stagingBufferMemory
+        );
+
+        void * data = stagingBufferMemory.mapMemory(0, bufferSize);
+        memcpy(data, indices.data(), bufferSize);
+        stagingBufferMemory.unmapMemory();
+
+        createBuffer(
+            bufferSize,
+            vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer,
+            vk::MemoryPropertyFlagBits::eDeviceLocal,
+            m_IndexBuffer,
+            m_IndexBufferMemory
+        );
+
+        copyBuffer(stagingBuffer, m_IndexBuffer, bufferSize);
+    }
+
     void createCommandBuffers() {
         vk::CommandBufferAllocateInfo allocInfo {
             .commandPool = m_CommandPool,
@@ -684,12 +718,13 @@ private:
         // TODO: why the dereference operator next to m_GraphicsPipeline? it was working before just fine
         commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *m_GraphicsPipeline);
         commandBuffer.bindVertexBuffers(0, *m_VertexBuffer, {0});
+        commandBuffer.bindIndexBuffer(*m_IndexBuffer, 0, vk::IndexType::eUint16);
         commandBuffer.setViewport(0, vk::Viewport(
             0.0f, 0.0f,
             static_cast<float>(m_SwapChainExtent.width), static_cast<float>(m_SwapChainExtent.height),
             0.0f, 1.0f));
         commandBuffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), m_SwapChainExtent));
-        commandBuffer.draw(static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+        commandBuffer.drawIndexed(indices.size(), 1, 0, 0, 0);
 
         commandBuffer.endRendering();
 
@@ -812,8 +847,16 @@ private:
     std::vector<vk::raii::Fence> m_InFlightFences {};
     uint32_t m_FrameIndex = 0;
 
+    // Note: the below setup is far from optimal; ideally we should allocate a single buffer
+    // and store both our vertex and index data in there, rather than creating individual buffers.
+    // It's also good to use a memory allocator on top of it all, like VMA. We are not doing it
+    // here because it would be slightly overkill for drawing just a couple simple shapes.
+    // We'll optimize this once there's an actual need/reason to do so.
+
     vk::raii::Buffer m_VertexBuffer = nullptr;
     vk::raii::DeviceMemory m_VertexBufferMemory = nullptr;
+    vk::raii::Buffer m_IndexBuffer = nullptr;
+    vk::raii::DeviceMemory m_IndexBufferMemory = nullptr;
 
     std::vector<const char *> m_RequiredDeviceExtensions = {vk::KHRSwapchainExtensionName};
 };
