@@ -13,6 +13,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/CMake")
 find_package (glfw3 REQUIRED)
 find_package (glm REQUIRED)
 find_package (Vulkan REQUIRED)
+find_package(stb REQUIRED)
 find_package (tinyobjloader REQUIRED)
 #find_package (tinygltf REQUIRED)
 find_package (KTX REQUIRED)
@@ -88,7 +89,7 @@ add_executable(VulkanHppTutorial main.cpp)
 
 target_compile_definitions(VulkanHppTutorial PRIVATE USE_CPP20_MODULES=1)
 
-target_link_libraries(VulkanHppTutorial VulkanCppModule glfw glm-module)
+target_link_libraries(VulkanHppTutorial VulkanCppModule glfw glm-module stb::stb)
 
 # TODO Should this be somewhere else?
 set(SLANGC_EXECUTABLE "C:\\VulkanSDK\\1.4.335.0\\Bin\\slangc.exe")
