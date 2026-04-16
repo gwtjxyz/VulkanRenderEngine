@@ -13,9 +13,12 @@ module;
 
 // Configure GLM to use Vulkan's depth range of 0.0-1.0
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
+// Enable experimental features
+#define GLM_ENABLE_EXPERIMENTAL
 
 #include <glm/glm.hpp>
 #include <glm/ext.hpp>
+
 
 export module glm;
 

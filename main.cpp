@@ -12,6 +12,7 @@ import vulkan;
 #if defined(_WIN32)
 #define STBI_WINDOWS_UTF8
 #endif // defined(_WIN32)
+
 #include <stb_image.h>
 
 #include <cassert>
@@ -20,9 +21,12 @@ import vulkan;
 
 import std;
 import glm;
+import tinyobjloader;
 
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
+const std::string MODEL_PATH = "assets/viking_room.obj";
+const std::string TEXTURE_PATH = "assets/viking_room.png";
 
 const std::vector<char const *> validationLayers = {
     "VK_LAYER_KHRONOS_validation"
@@ -54,24 +58,22 @@ struct Vertex {
             vk::VertexInputAttributeDescription(2, 0, vk::Format::eR32G32Sfloat, offsetof(Vertex, texCoord))
         };
     }
+
+    bool operator==(const Vertex& other) const {
+        return pos == other.pos && color == other.color && texCoord == other.texCoord;
+    }
 };
 
-const std::vector<Vertex> vertices = {
-    {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-    {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-    {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-    {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
-
-    {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-    {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-    {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-    {{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
-};
-
-const std::vector<uint16_t> indices = {
-    0, 1, 2, 2, 3, 0,
-    4, 5, 6, 6, 7, 4
-};
+// Hash function for Vertex struct
+namespace std {
+    template<> struct hash<Vertex> {
+        size_t operator()(Vertex const & vertex) const noexcept {
+            return ((hash<glm::vec3>()(vertex.pos) ^
+                    (hash<glm::vec3>()(vertex.color) << 1)) << 1) ^
+                    (hash<glm::vec2>()(vertex.texCoord) << 1);
+        }
+    };
+}
 
 // Use alignas to make sure all variables are always aligned the way Vulkan expects them to be
 struct UniformBufferObject {
@@ -147,6 +149,7 @@ private:
         createTextureImage();
         createTextureImageView();
         createTextureSampler();
+        loadModel();
         createVertexBuffer();
         createIndexBuffer();
         createUniformBuffers();
@@ -705,7 +708,7 @@ private:
     void createTextureImage() {
         int texWidth, texHeight, texChannels;
         // TODO add some platform-specific abstraction, currently this will only work on Windows
-        auto pathToTexture = pathFromProjectDir("assets/texture.jpg").wstring();
+        auto pathToTexture = pathFromProjectDir(TEXTURE_PATH).wstring();
         char utf8PathBuffer[256] = {}; // TODO use something more safe
         auto xd = stbi_convert_wchar_to_utf8(utf8PathBuffer, pathToTexture.size() + 1, pathToTexture.c_str());
         stbi_uc * pixels = stbi_load(utf8PathBuffer, &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
@@ -809,8 +812,46 @@ private:
         m_TextureSampler = vk::raii::Sampler(m_Device, samplerInfo);
     }
 
+    void loadModel() {
+        tinyobj::attrib_t attrib;
+        std::vector<tinyobj::shape_t> shapes;
+        std::vector<tinyobj::material_t> materials;
+        std::string warn, err;
+        std::unordered_map<Vertex, uint32_t> uniqueVertices {};
+
+        // TODO wchar support?
+        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, pathFromProjectDir(MODEL_PATH).string().c_str())) {
+            throw std::runtime_error(warn + err);
+        }
+
+        for (const auto & shape : shapes) {
+            for (const auto & index : shape.mesh.indices) {
+                Vertex vertex {};
+                vertex.pos = {
+                    attrib.vertices[3 * index.vertex_index + 0],
+                    attrib.vertices[3 * index.vertex_index + 1],
+                    attrib.vertices[3 * index.vertex_index + 2]
+                };
+
+                // OBJ assumes 0 = bottom of the image, but Vulkan works with 0 = top of the image, so we flip y coord
+                vertex.texCoord = {
+                    attrib.texcoords[2 * index.texcoord_index + 0],
+                    1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
+                };
+                vertex.color = {1.0f, 1.0f, 1.0f};
+
+                if (!uniqueVertices.contains(vertex)) {
+                    uniqueVertices[vertex] = static_cast<uint32_t>(m_Vertices.size());
+                    m_Vertices.push_back(vertex);
+                }
+
+                m_Indices.push_back(uniqueVertices[vertex]);
+            }
+        }
+    }
+
     void createVertexBuffer() {
-        vk::DeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+        vk::DeviceSize bufferSize = sizeof(m_Vertices[0]) * m_Vertices.size();
 
         vk::raii::Buffer stagingBuffer = nullptr;
         vk::raii::DeviceMemory stagingBufferMemory = nullptr;
@@ -823,7 +864,7 @@ private:
             stagingBufferMemory
         );
         void * dataStaging = stagingBufferMemory.mapMemory(0, bufferSize);
-        memcpy(dataStaging, vertices.data(), bufferSize);
+        memcpy(dataStaging, m_Vertices.data(), bufferSize);
         stagingBufferMemory.unmapMemory();
 
         // Device local buffer as actual buffer
@@ -899,7 +940,7 @@ private:
     }
 
     void createIndexBuffer() {
-        vk::DeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+        vk::DeviceSize bufferSize = sizeof(m_Indices[0]) * m_Indices.size();
 
         vk::raii::Buffer stagingBuffer({});
         vk::raii::DeviceMemory stagingBufferMemory({});
@@ -912,7 +953,7 @@ private:
         );
 
         void * data = stagingBufferMemory.mapMemory(0, bufferSize);
-        memcpy(data, indices.data(), bufferSize);
+        memcpy(data, m_Indices.data(), bufferSize);
         stagingBufferMemory.unmapMemory();
 
         createBuffer(
@@ -1075,14 +1116,14 @@ private:
         // TODO: why the dereference operator next to m_GraphicsPipeline? it was working before just fine
         commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *m_GraphicsPipeline);
         commandBuffer.bindVertexBuffers(0, *m_VertexBuffer, {0});
-        commandBuffer.bindIndexBuffer(*m_IndexBuffer, 0, vk::IndexType::eUint16);
+        commandBuffer.bindIndexBuffer(*m_IndexBuffer, 0, vk::IndexType::eUint32);
         commandBuffer.setViewport(0, vk::Viewport(
             0.0f, 0.0f,
             static_cast<float>(m_SwapChainExtent.width), static_cast<float>(m_SwapChainExtent.height),
             0.0f, 1.0f));
         commandBuffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), m_SwapChainExtent));
         commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_PipelineLayout, 0, *m_DescriptorSets[m_FrameIndex], nullptr);
-        commandBuffer.drawIndexed(indices.size(), 1, 0, 0, 0);
+        commandBuffer.drawIndexed(m_Indices.size(), 1, 0, 0, 0);
 
         commandBuffer.endRendering();
 
@@ -1262,6 +1303,8 @@ private:
     // here because it would be slightly overkill for drawing just a couple simple shapes.
     // We'll optimize this once there's an actual need/reason to do so.
 
+    std::vector<Vertex>  m_Vertices;
+    std::vector<uint32_t> m_Indices;
     vk::raii::Buffer m_VertexBuffer = nullptr;
     vk::raii::DeviceMemory m_VertexBufferMemory = nullptr;
     vk::raii::Buffer m_IndexBuffer = nullptr;

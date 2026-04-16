@@ -76,12 +76,33 @@ if(ENABLE_CPP20_MODULE)
 
     # GLM hack based on this: https://github.com/g-truc/glm/issues/1372#issuecomment-3042171253
     add_library(glm-module)
+    if(MSVC)
+        # Add MSVC-specific compiler options for proper C++ module support
+        # Need this so GLM knows what C++ version we have and properly includes its hash header
+        target_compile_options(glm-module PRIVATE
+                /std:c++latest      # Use latest C++ standard for better module support
+                /permissive-        # Standards conformance mode
+                /Zc:__cplusplus     # Enable correct __cplusplus macro
+                /EHsc               # Enable C++ exception handling
+                /Zc:preprocessor    # Use conforming preprocessor
+                /translateInclude   # Automatically translate #include to import for standard library
+        )
+    endif()
     target_sources(glm-module PUBLIC
         FILE_SET CXX_MODULES
         FILES
         "${CMAKE_SOURCE_DIR}/modules/glm.cppm"
     )
     target_link_libraries(glm-module PUBLIC glm::glm)
+
+    # TODO maybe add __cplusplus definition to this too, works fine without it so far though so will do later if problems arise
+    add_library(tinyobjloader-module)
+    target_sources(tinyobjloader-module PUBLIC
+        FILE_SET CXX_MODULES
+        FILES
+        "${CMAKE_SOURCE_DIR}/modules/tinyobjloader.cppm"
+    )
+    target_link_libraries(tinyobjloader-module PUBLIC tinyobjloader::tinyobjloader)
 endif()
 
 
@@ -89,7 +110,7 @@ add_executable(VulkanHppTutorial main.cpp)
 
 target_compile_definitions(VulkanHppTutorial PRIVATE USE_CPP20_MODULES=1)
 
-target_link_libraries(VulkanHppTutorial VulkanCppModule glfw glm-module stb::stb)
+target_link_libraries(VulkanHppTutorial VulkanCppModule glfw glm-module stb::stb tinyobjloader-module)
 
 # TODO Should this be somewhere else?
 set(SLANGC_EXECUTABLE "C:\\VulkanSDK\\1.4.335.0\\Bin\\slangc.exe")
