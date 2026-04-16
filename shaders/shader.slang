@@ -1,5 +1,5 @@
 struct VSInput {
-    float2 inPos; // implicitly location 0
+    float3 inPosition; // implicitly location 0
     float3 inColor;    // implicitly location 1
     float2 inTexCoord; // implicitly location 2
 }
@@ -20,7 +20,7 @@ struct VSOutput {
 [shader("vertex")]
 VSOutput vertMain(VSInput input) {
     VSOutput output;
-    output.pos = mul(ubo.proj, mul(ubo.view, mul(ubo.model, float4(input.inPos, 0.0, 1.0))));
+    output.pos = mul(ubo.proj, mul(ubo.view, mul(ubo.model, float4(input.inPosition, 1.0))));
     output.fragColor = input.inColor;
     output.fragTexCoord = input.inTexCoord;
     return output;

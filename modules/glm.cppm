@@ -11,6 +11,9 @@ module;
 // #define GLM_EXT_INLINE_NAMESPACE to inline glm::ext into glm
 // #define GLM_GTX_INLINE_NAMESPACE to inline glm::gtx into glm
 
+// Configure GLM to use Vulkan's depth range of 0.0-1.0
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+
 #include <glm/glm.hpp>
 #include <glm/ext.hpp>
 
