@@ -106,14 +106,14 @@ if(ENABLE_CPP20_MODULE)
 endif()
 
 
-add_executable(VulkanHppTutorial main.cpp)
+add_executable(VulkanHppTutorial src/main.cpp)
 
 target_compile_definitions(VulkanHppTutorial PRIVATE USE_CPP20_MODULES=1)
 
 target_link_libraries(VulkanHppTutorial VulkanCppModule glfw glm-module stb::stb tinyobjloader-module)
 
 # TODO Should this be somewhere else?
-set(SLANGC_EXECUTABLE "C:\\VulkanSDK\\1.4.335.0\\Bin\\slangc.exe")
+set(SLANGC_EXECUTABLE "$ENV{VULKAN_SDK}/Bin/slangc.exe")
 
 # Slang shader compilation
 function (add_slang_shader_target TARGET)

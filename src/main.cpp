@@ -654,7 +654,6 @@ private:
             .renderPass = nullptr                   // we're using dynamic rendering instead of render passes
         };
 
-
         m_GraphicsPipeline = vk::raii::Pipeline(m_Device, nullptr, pipelineInfo);
     }
 
