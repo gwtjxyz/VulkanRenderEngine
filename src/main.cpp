@@ -1,16 +1,10 @@
-#if defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES)
+#if defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES) || defined(DISABLE_VULKAN_MODULE)
 #include <vulkan/vulkan_raii.hpp>
 #else // defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES)
 import vulkan;
 #endif // defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES)
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
-#define STB_IMAGE_IMPLEMENTATION
-#if defined(_WIN32)
-#define STBI_WINDOWS_UTF8
-#endif // defined(_WIN32)
-
-#include <stb_image.h>
 
 #include <cassert>
 #include <cstdlib>
@@ -19,6 +13,8 @@ import vulkan;
 import std;
 import glm;
 import tinyobjloader;
+
+import platform;
 
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
@@ -34,8 +30,6 @@ constexpr bool enableValidationLayers = false;
 #else
 constexpr bool enableValidationLayers = true;
 #endif // NDEBUG
-
-const std::string PROJECT_DIR = "VulkanHppTutorial";
 
 constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -78,17 +72,6 @@ struct UniformBufferObject {
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 proj;
 };
-
-static std::filesystem::path pathFromProjectDir(const std::string & relativePath) {
-    auto currentPath = std::filesystem::current_path();
-    while (currentPath.filename() != std::filesystem::path(PROJECT_DIR)) {
-        assert(currentPath != currentPath.parent_path());
-        currentPath = currentPath.parent_path();
-    }
-
-    auto combinedPath = currentPath / std::filesystem::path(relativePath).make_preferred();
-    return combinedPath;
-}
 
 static std::vector<char> readFile(const std::string & filename) {
     // start reading at the end of file + read the file as binary
@@ -300,6 +283,9 @@ private:
         }
 
         vk::InstanceCreateInfo createInfo {
+#ifdef __APPLE__
+            .flags = vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR,
+#endif
             .pApplicationInfo = &appInfo,
             .enabledLayerCount = static_cast<uint32_t>(requiredLayers.size()),
             .ppEnabledLayerNames = requiredLayers.data(),
@@ -331,7 +317,10 @@ private:
         if (enableValidationLayers) {
             extensions.push_back(vk::EXTDebugUtilsExtensionName);
         }
-
+#ifdef __APPLE__
+        // portability enumeration extension for MacOS compatibility
+        extensions.push_back(vk::KHRPortabilityEnumerationExtensionName);
+#endif
         return extensions;
     }
 
@@ -428,7 +417,12 @@ private:
         }
 
         // Create a chain of feature structures
-        vk::StructureChain<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> featureChain = {
+        vk::StructureChain<
+            vk::PhysicalDeviceFeatures2,
+            vk::PhysicalDeviceVulkan11Features,
+            vk::PhysicalDeviceVulkan13Features,
+            vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
+        > featureChain = {
             {.features = {.samplerAnisotropy = true}},                   // vk::PhysicalDeviceFeatures2
             {.shaderDrawParameters = true},                                 // Enable shader draw parameters from Vulkan 1.1, necessary for shader objects (I think)
             {.synchronization2 = true, .dynamicRendering = true},           // Enable dynamic rendering from Vulkan 1.3
@@ -735,21 +729,16 @@ private:
         }
     }
 
-    bool hasStencilComponent(vk::Format format) {
+    static bool hasStencilComponent(vk::Format format) {
         return format == vk::Format::eD32SfloatS8Uint || format == vk::Format::eD24UnormS8Uint;
     }
 
     void createTextureImage() {
-        int texWidth, texHeight, texChannels;
-        // TODO add some platform-specific abstraction, currently this will only work on Windows
-        auto pathToTexture = pathFromProjectDir(TEXTURE_PATH).wstring();
-        char utf8PathBuffer[256] = {}; // TODO use something more safe
-        stbi_convert_wchar_to_utf8(utf8PathBuffer, pathToTexture.size() + 1, pathToTexture.c_str());
-        stbi_uc * pixels = stbi_load(utf8PathBuffer, &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        TextureImage textureImage(TEXTURE_PATH);
 
-        vk::DeviceSize imageSize = texWidth * texHeight * 4;
+        vk::DeviceSize imageSize = textureImage.width * textureImage.height * 4;
 
-        if (!pixels) {
+        if (!textureImage.pixels) {
             throw std::runtime_error("failed to load texture image!");
         }
 
@@ -765,15 +754,13 @@ private:
         );
 
         void * data = stagingBufferMemory.mapMemory(0, imageSize);
-        memcpy(data, pixels, imageSize);
+        memcpy(data, textureImage.pixels, imageSize);
         stagingBufferMemory.unmapMemory();
 
-        stbi_image_free(pixels);
-
-        m_MipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1;
+        m_MipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(textureImage.width, textureImage.height)))) + 1;
         createImage(
-            texWidth,
-            texHeight,
+            textureImage.width,
+            textureImage.height,
             m_MipLevels,
             vk::SampleCountFlagBits::e1,
             vk::Format::eR8G8B8A8Srgb,
@@ -785,9 +772,9 @@ private:
         );
 
         transitionImageLayout(m_TextureImage, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal, m_MipLevels);
-        copyBufferToImage(stagingBuffer, m_TextureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+        copyBufferToImage(stagingBuffer, m_TextureImage, static_cast<uint32_t>(textureImage.width), static_cast<uint32_t>(textureImage.height));
         // Transitioned to VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL while generating mipmaps
-        generateMipmaps(m_TextureImage, vk::Format::eR8G8B8A8Srgb, texWidth, texHeight, m_MipLevels);
+        generateMipmaps(m_TextureImage, vk::Format::eR8G8B8A8Srgb, textureImage.width, textureImage.height, m_MipLevels);
     }
 
     void createImage(
@@ -1472,7 +1459,12 @@ private:
 
     vk::SampleCountFlagBits m_MsaaSamples = vk::SampleCountFlagBits::e1;
 
-    std::vector<const char *> m_RequiredDeviceExtensions = {vk::KHRSwapchainExtensionName};
+    std::vector<const char *> m_RequiredDeviceExtensions = {
+        vk::KHRSwapchainExtensionName
+#ifdef __APPLE__
+        ,vk::KHRPortabilitySubsetExtensionName
+#endif
+    };
 };
 
 int main() {
