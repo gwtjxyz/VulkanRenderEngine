@@ -58,7 +58,9 @@ if(ENABLE_CPP20_MODULE)
     add_library(Vulkan::cppm ALIAS VulkanCppModule)
 
     target_compile_definitions(VulkanCppModule
-            PUBLIC VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1 VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1 VK_ENABLE_BETA_EXTENSIONS
+            PUBLIC VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
+            VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1
+            VK_ENABLE_BETA_EXTENSIONS                       # For MacOS support
     )
     target_include_directories(VulkanCppModule
             PUBLIC
@@ -143,7 +145,7 @@ target_link_libraries(VulkanHppTutorial VulkanCppModule glfw glm-module stb::stb
 
 # TODO Should this be somewhere else?
 if(MSVC)
-    set(SLANGC_EXECUTABLE "$ENV{VULKAN_SDK}/Bin/slangc.exe")
+    set(SLANGC_EXECUTABLE "$ENV{VULKAN_SDK}\\Bin\\slangc.exe")
 else() # TODO Linux support
     set(SLANGC_EXECUTABLE "$ENV{VULKAN_SDK}/bin/slangc")
 endif()

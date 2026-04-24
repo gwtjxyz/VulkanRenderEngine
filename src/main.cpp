@@ -56,15 +56,13 @@ struct Vertex {
 };
 
 // Hash function for Vertex struct
-namespace std {
-    template<> struct hash<Vertex> {
-        size_t operator()(Vertex const & vertex) const noexcept {
-            return ((hash<glm::vec3>()(vertex.pos) ^
-                    (hash<glm::vec3>()(vertex.color) << 1)) << 1) ^
-                    (hash<glm::vec2>()(vertex.texCoord) << 1);
-        }
-    };
-}
+template<> struct std::hash<Vertex> {
+    size_t operator()(Vertex const & vertex) const noexcept {
+        return ((hash<glm::vec3>()(vertex.pos) ^
+                (hash<glm::vec3>()(vertex.color) << 1)) << 1) ^
+            (hash<glm::vec2>()(vertex.texCoord) << 1);
+    }
+};
 
 // Use alignas to make sure all variables are always aligned the way Vulkan expects them to be
 struct UniformBufferObject {
@@ -107,10 +105,11 @@ private:
         m_Window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
         glfwSetWindowUserPointer(m_Window, this);
         glfwSetFramebufferSizeCallback(m_Window, framebufferResizeCallback);
+        glfwSetKeyCallback(m_Window, keyCallback);
     }
 
     static void framebufferResizeCallback(GLFWwindow * window, int width, int height) {
-        auto app = reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+        auto app = static_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
         app->m_FramebufferResized = true;
     }
 
@@ -143,10 +142,20 @@ private:
     void mainLoop() {
         while (!glfwWindowShouldClose(m_Window)) {
             glfwPollEvents();
+            if (m_ShadersSetToReload) {
+                recompileShadersAndRecreatePipeline();
+            }
             drawFrame();
         }
 
         m_Device.waitIdle();
+    }
+
+    static void keyCallback(GLFWwindow * window, int key, int scancode, int action, int mods) {
+        auto app = static_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+        if (key == GLFW_KEY_R && action == GLFW_PRESS) {
+            app->m_ShadersSetToReload = true;
+        }
     }
 
     void cleanup() {
@@ -309,7 +318,7 @@ private:
         m_DebugMessenger = m_Instance.createDebugUtilsMessengerEXT(debugUtilsMessengerCreateInfoEXT);
     }
 
-    std::vector<const char *> getRequiredInstanceExtensions() {
+    static std::vector<const char *> getRequiredInstanceExtensions() {
         uint32_t glfwExtensionCount = 0;
         auto glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
 
@@ -477,7 +486,7 @@ private:
         m_SwapChainImages = m_SwapChain.getImages();
     }
 
-    vk::SurfaceFormatKHR chooseSwapSurfaceFormat(std::vector<vk::SurfaceFormatKHR> const & availableFormats) {
+    static vk::SurfaceFormatKHR chooseSwapSurfaceFormat(std::vector<vk::SurfaceFormatKHR> const & availableFormats) {
         const auto formatIt = std::ranges::find_if(
             availableFormats,
             [](const auto & format) {
@@ -486,7 +495,7 @@ private:
         return formatIt != availableFormats.end() ? *formatIt : availableFormats[0];
     }
 
-    vk::PresentModeKHR chooseSwapPresentMode(std::vector<vk::PresentModeKHR> const & availablePresentModes) {
+    static vk::PresentModeKHR chooseSwapPresentMode(std::vector<vk::PresentModeKHR> const & availablePresentModes) {
         assert(std::ranges::any_of(availablePresentModes, [](auto presentMode) { return presentMode == vk::PresentModeKHR::eFifo; }));
         return std::ranges::any_of(availablePresentModes, [](const vk::PresentModeKHR value) {
             return vk::PresentModeKHR::eMailbox == value;
@@ -507,7 +516,7 @@ private:
         };
     }
 
-    uint32_t chooseSwapMinImageCount(vk::SurfaceCapabilitiesKHR const & surfaceCapabilities) {
+    static uint32_t chooseSwapMinImageCount(vk::SurfaceCapabilitiesKHR const & surfaceCapabilities) {
         auto minImageCount = std::max(3u, surfaceCapabilities.minImageCount);
         if ((0 < surfaceCapabilities.maxImageCount) && (surfaceCapabilities.maxImageCount < minImageCount)) {
             minImageCount = surfaceCapabilities.maxImageCount;
@@ -531,7 +540,7 @@ private:
             .format = format,
             .subresourceRange = { aspectFlags, 0, mipLevels, 0, 1 }
         };
-        return vk::raii::ImageView(m_Device, viewInfo);
+        return {m_Device, viewInfo};
     }
 
     void createDescriptorSetLayout() {
@@ -727,6 +736,8 @@ private:
 
             throw std::runtime_error("Failed to find supported format!");
         }
+
+        throw std::runtime_error("No candidates for supported format supplied!");
     }
 
     static bool hasStencilComponent(vk::Format format) {
@@ -1391,6 +1402,15 @@ private:
         createColorResources();
         createDepthResources();
     }
+
+    void recompileShadersAndRecreatePipeline() {
+        m_Device.waitIdle();
+
+        recompileShader("shaders/shader.slang", "shaders/slang.spv");
+        m_GraphicsPipeline.clear();
+        createGraphicsPipeline();
+        m_ShadersSetToReload = false;
+    }
 public:
     // public variables go here
 private:
@@ -1414,6 +1434,7 @@ private:
     vk::raii::DescriptorSetLayout m_DescriptorSetLayout = nullptr;
     vk::raii::PipelineLayout m_PipelineLayout = nullptr;
     vk::raii::Pipeline m_GraphicsPipeline = nullptr;
+    bool m_ShadersSetToReload = false;
 
     vk::raii::CommandPool m_CommandPool = nullptr;
     std::vector<vk::raii::CommandBuffer> m_CommandBuffers {};

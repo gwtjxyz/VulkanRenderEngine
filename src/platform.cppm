@@ -4,6 +4,7 @@ module;
 #define STB_IMAGE_IMPLEMENTATION
 #if defined(_WIN32)
 #define STBI_WINDOWS_UTF8
+#include <windows.h>
 #endif // defined(_WIN32)
 #include <stb_image.h>
 
@@ -22,6 +23,44 @@ export std::filesystem::path pathFromProjectDir(const std::string & relativePath
 
     auto combinedPath = currentPath / std::filesystem::path(relativePath).make_preferred();
     return combinedPath;
+}
+
+// TODO cleanup this code/swap over to using Slang's compilation API
+export void recompileShader(const std::string & shaderPathFromProjectFolder, const std::string & outputPathFromProjectFolder) {
+#if defined(_WIN32)
+    STARTUPINFO si {};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi {};
+    auto shaderPath = pathFromProjectDir(shaderPathFromProjectFolder);
+    auto outputPath = pathFromProjectDir(outputPathFromProjectFolder);
+    auto compilerPath = pathFromProjectDir("external/slangc.exe");
+    // TODO parametrize this somehow?
+    auto arguments = compilerPath.string().append(
+        " " + shaderPath.string() +
+        " -target spirv -profile spirv_1_4 -emit-spirv-directly"
+        " -fvk-use-entrypoint-name -entry vertMain -entry fragMain"
+        " -o " + outputPath.string());
+
+    if (CreateProcessA(
+        compilerPath.string().c_str(),
+        arguments.data(),
+        nullptr,
+        nullptr,
+        FALSE,
+        0,
+        nullptr,
+        nullptr,
+        &si,
+        &pi
+    )) {
+        WaitForSingleObject(pi.hProcess, INFINITE);
+    }
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+#else
+    // TODO other platforms support
+    throw std::runtime_error("recompileShader function not defined for this platform!");
+#endif
 }
 
 // STB Image wrapper
