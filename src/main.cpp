@@ -15,6 +15,7 @@ import glm;
 import tinyobjloader;
 
 import platform;
+import render;
 
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
@@ -106,11 +107,47 @@ private:
         glfwSetWindowUserPointer(m_Window, this);
         glfwSetFramebufferSizeCallback(m_Window, framebufferResizeCallback);
         glfwSetKeyCallback(m_Window, keyCallback);
+        glfwSetCursorPosCallback(m_Window, mouseCallback);
+        glfwSetScrollCallback(m_Window, scrollCallback);
+
+        glfwSetInputMode(m_Window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     }
 
     static void framebufferResizeCallback(GLFWwindow * window, int width, int height) {
         auto app = static_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
         app->m_FramebufferResized = true;
+    }
+
+    static void keyCallback(GLFWwindow * window, int key, int scancode, int action, int mods) {
+        auto app = static_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+        if (key == GLFW_KEY_R && action == GLFW_PRESS) {
+            app->m_ShadersSetToReload = true;
+        }
+    }
+
+    static void mouseCallback(GLFWwindow * window, double xPos, double yPos) {
+        static bool firstMouse = true;
+        static float lastX = 0.0f, lastY = 0.0f;
+
+        if (firstMouse) {
+            lastX = static_cast<float>(xPos);
+            lastY = static_cast<float>(yPos);
+            firstMouse = false;
+        }
+
+        const float xOffset = static_cast<float>(xPos) - lastX;
+        const float yOffset = lastY - static_cast<float>(yPos);   // Inverted: screen Y increases downward, camera pitch increases upward
+
+        lastX = static_cast<float>(xPos);
+        lastY = static_cast<float>(yPos);
+
+        auto app = static_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+        app->m_Camera.processMouseMovement(xOffset, yOffset);
+    }
+
+    static void scrollCallback(GLFWwindow * window, double xOffset, double yOffset) {
+        auto app = static_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+        app->m_Camera.processMouseScroll(static_cast<float>(yOffset));
     }
 
     void initVulkan() {
@@ -140,8 +177,12 @@ private:
     }
 
     void mainLoop() {
+        advanceDeltaTime();
+
         while (!glfwWindowShouldClose(m_Window)) {
+            advanceDeltaTime();
             glfwPollEvents();
+            processInput(m_Window, m_Camera, m_DeltaTime);
             if (m_ShadersSetToReload) {
                 recompileShadersAndRecreatePipeline();
             }
@@ -151,11 +192,24 @@ private:
         m_Device.waitIdle();
     }
 
-    static void keyCallback(GLFWwindow * window, int key, int scancode, int action, int mods) {
-        auto app = static_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
-        if (key == GLFW_KEY_R && action == GLFW_PRESS) {
-            app->m_ShadersSetToReload = true;
-        }
+    // For continuously inputting keys; for them only being pressed once, we keep the callback
+    void processInput(GLFWwindow * window, Camera & camera, const float deltaTime) {
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+            camera.processKeyboard(CameraMovement::FORWARD, deltaTime);
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+            camera.processKeyboard(CameraMovement::BACKWARD, deltaTime);
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+            camera.processKeyboard(CameraMovement::LEFT, deltaTime);
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+            camera.processKeyboard(CameraMovement::RIGHT, deltaTime);
+
+        if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+            camera.processKeyboard(CameraMovement::UP, deltaTime);
+        if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
+            camera.processKeyboard(CameraMovement::DOWN, deltaTime);
+
+        if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+            glfwSetWindowShouldClose(window, true);
     }
 
     void cleanup() {
@@ -223,6 +277,15 @@ private:
         m_FrameIndex = (m_FrameIndex+1) % MAX_FRAMES_IN_FLIGHT;
     }
 
+    void advanceDeltaTime() {
+        static auto startTime = std::chrono::high_resolution_clock::now();
+
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        m_DeltaTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+        // std::println("m_DeltaTime: {}", m_DeltaTime);
+        startTime = currentTime;
+    }
+
     void updateUniformBuffer(uint32_t currentImage) {
         static auto startTime = std::chrono::high_resolution_clock::now();
 
@@ -230,18 +293,19 @@ private:
         float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
         UniformBufferObject ubo {};
-        ubo.model = glm::gtc::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        ubo.view = glm::gtc::lookAt(
-            glm::vec3(2.0f, 2.0f, 2.0f),
-            glm::vec3(0.0f, 0.0f, 0.0f),
-            glm::vec3(0.0f, 0.0f, 1.0f)
+        glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.5f, -2.0f));
+        model = glm::rotate(model, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        ubo.model = glm::rotate(model, time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.view = m_Camera.getViewMatrix();
+        ubo.proj = m_Camera.getProjectionMatrix(
+            static_cast<float>(m_SwapChainExtent.width) / static_cast<float>(m_SwapChainExtent.height)
         );
-        ubo.proj = glm::gtc::perspective(
-            glm::radians(45.0f),
-            static_cast<float>(m_SwapChainExtent.width) / static_cast<float>(m_SwapChainExtent.height),
-            0.1f,
-            10.0f
-        );
+        // ubo.proj = glm::perspective(
+        //     glm::radians(45.0f),
+        //     static_cast<float>(m_SwapChainExtent.width) / static_cast<float>(m_SwapChainExtent.height),
+        //     0.1f,
+        //     10.0f
+        // );
         ubo.proj[1][1] *= -1; // Vulkan's Y coordinate is inverted compared to OpenGL's, which glm was designed for originally
         memcpy(m_UniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
     }
@@ -1415,6 +1479,9 @@ public:
     // public variables go here
 private:
     GLFWwindow * m_Window = nullptr;
+    Camera m_Camera{};
+    float m_DeltaTime = 0.0f;
+
     vk::raii::Context m_Context;
     vk::raii::Instance m_Instance = nullptr;
     vk::raii::DebugUtilsMessengerEXT m_DebugMessenger = nullptr;

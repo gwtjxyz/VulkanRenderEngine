@@ -134,9 +134,10 @@ endif()
 
 
 add_executable(VulkanHppTutorial src/main.cpp)
+# Compile modules
 target_sources(VulkanHppTutorial PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
-        src/platform.cppm
+        src/platform.cppm src/render.cppm
 )
 
 target_compile_definitions(VulkanHppTutorial PRIVATE USE_CPP20_MODULES=1)

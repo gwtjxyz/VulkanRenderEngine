@@ -15,6 +15,10 @@ module;
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 // Enable experimental features
 #define GLM_ENABLE_EXPERIMENTAL
+// Inline namespaces
+#define GLM_GTC_INLINE_NAMESPACE
+#define GLM_EXT_INLINE_NAMESPACE
+#define GLM_GTX_INLINE_NAMESPACE
 
 #include <glm/glm.hpp>
 #include <glm/ext.hpp>
