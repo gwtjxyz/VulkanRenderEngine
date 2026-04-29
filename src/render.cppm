@@ -15,6 +15,7 @@ export enum class CameraMovement {
 };
 
 // TODO: third-person camera
+// TODO: switch to quaternions eventually, once I have a UI to debug them
 export class Camera {
 public:
     explicit Camera(
@@ -37,6 +38,7 @@ public:
 
     [[nodiscard]] glm::mat4 getViewMatrix() const {
         return glm::lookAt(m_Position, m_Position + m_Front, m_Up);
+        // return glm::translate(glm::toMat4(glm::quatLookAt(m_Front, m_Up)), m_Position);
     }
 
     [[nodiscard]] glm::mat4 getProjectionMatrix(float aspectRatio, float nearPlane = 0.1f, float farPlane = 100.0f) const {
@@ -126,13 +128,24 @@ private:
 
     void updateCameraVectors() {
         // const glm::quat rotationQuat = quatFromAngles();
+#if 0
+        // OpenGL world coordinate system => negative-z is forward
+        glm::vec3 newFront {0.0f, 0.0f, -1.0f};
+        // glm::quat rotation = quatFromAngles();
+        // why do we need to invert Y??
+        auto rotation = glm::quat(glm::vec3(
+            glm::radians(m_Spin.pitch),
+            -glm::radians(m_Spin.yaw),
+            glm::radians(m_Spin.roll)
+        ));
+        m_Front = rotation * newFront;
+#else
         glm::vec3 newFront {};
         newFront.x = glm::cos(glm::radians(m_Spin.yaw)) * glm::cos(glm::radians(m_Spin.pitch));
         newFront.y = glm::sin(glm::radians(m_Spin.pitch));
         newFront.z = glm::sin(glm::radians(m_Spin.yaw)) * glm::cos(glm::radians(m_Spin.pitch));
         m_Front = glm::normalize(newFront);
-
-        // std::println("Updated front vector to {}", m_Front);
+#endif
 
         m_Right = glm::normalize(glm::cross(m_Front, m_WorldUp));
         m_Up = glm::normalize(glm::cross(m_Right, m_Front));
