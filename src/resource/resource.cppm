@@ -4,7 +4,7 @@ module;
 #include <typeindex>
 
 #if defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES) || defined(DISABLE_VULKAN_MODULE)
-#include <vulkan/vulkan_raii.hpp>
+#include <vulkan/vulkan.hpp>
 #endif
 
 export module resource;
@@ -12,7 +12,9 @@ export module resource;
 import std;
 import platform;
 import render_service_locator;
+import render_types;
 
+import tinyobjloader;
 #if !(defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES) || defined(DISABLE_VULKAN_MODULE))
 import vulkan;
 #endif
@@ -220,7 +222,7 @@ public:
     }
 protected:
     bool doLoad() override {
-        std::string filePath = "assets/" + getId() + ".png";
+        const std::string filePath = "assets/" + getId() + ".png";
 
         StbImageWrapper data = loadImageData(filePath);
         if (!data.pixels) {
@@ -229,13 +231,14 @@ protected:
 
         createVulkanImage(data);
 
+        // StbImageWrapper's data will be freed automatically upon the object going out of scope
         return true;
     }
 
     void doUnload() override {
         // Only perform cleanup if resource is currently loaded
         if (isLoaded()) {
-            vk::Device device = getDevice();
+            const vk::Device device = Locator::getVulkanResourceService()->getDevice();
 
             device.destroySampler(m_Sampler);
             device.destroyImageView(m_ImageView);
@@ -255,17 +258,13 @@ private:
     }
 
     void createVulkanImage(StbImageWrapper & data) {
-        auto imageData = Locator::getVulkanResourceService()->createTexture(data);
+        const auto imageData = Locator::getVulkanResourceService()->createTexture(data);
 
         m_Image = imageData.image;
         m_DeviceMemory = imageData.imageMemory;
         m_Offset = 0; // TODO: change when we start supporting different offsets
         m_ImageView = imageData.imageView;
         m_Sampler = imageData.sampler;
-    }
-
-    vk::Device getDevice() {
-        return Locator::getVulkanResourceService()->getDevice();
     }
 
 private:
@@ -282,4 +281,141 @@ private:
     int m_Channels = 0;                       // Number of color channels (RGB=3, RGBA=4, etc)
 
     // Render resource service locator
+};
+
+export class Mesh : public Resource {
+public:
+    explicit Mesh(const std::string & id) : Resource(id) {}
+
+    // TODO rule of 5
+    ~Mesh() override {
+        unload();
+    }
+
+    [[nodiscard]] vk::Buffer getVertexBuffer() const {
+        return m_VertexBuffer;
+    }
+    [[nodiscard]] vk::Buffer getIndexBuffer() const {
+        return m_IndexBuffer;
+    }
+    [[nodiscard]] uint32_t getVertexCount() const {
+        return m_VertexCount;
+    }
+    [[nodiscard]] uint32_t getIndexCount() const {
+        return m_IndexCount;
+    }
+protected:
+    bool doLoad() override {
+        // TODO support more formats (like glTF)
+        const std::string filePath = "assets/" + getId() + ".obj";
+
+        // Temp storage for vertices and indices
+        std::vector<Vertex> vertices;
+        std::vector<uint32_t> indices;
+        if (!loadMeshData(filePath, vertices, indices)) {
+            return false;   // Failed to parse - abort loading
+        }
+
+        createVertexBuffer(vertices);   // Upload vertex attributes to GPU
+        createIndexBuffer(indices);    // Upload triangle connectivity to GPU
+
+        // Cache metadata for efficient rendering operations
+        m_VertexCount = static_cast<uint32_t>(vertices.size());
+        m_IndexCount = static_cast<uint32_t>(indices.size());
+
+        return true;
+    }
+
+    void doUnload() override {
+        // Only proceed with cleanup if resources are currently loaded
+        if (isLoaded()) {
+            vk::Device device = Locator::getVulkanResourceService()->getDevice();
+
+            // Clean up index resources first to maintain clear dependency order
+            device.destroyBuffer(m_IndexBuffer);
+            device.freeMemory(m_IndexBufferMemory);
+
+            // Vertex resources cleaned up second
+            device.destroyBuffer(m_VertexBuffer);
+            device.freeMemory(m_VertexBufferMemory);
+        }
+    }
+private:
+    static bool loadMeshData(const std::string & filePath, std::vector<Vertex> & vertices, std::vector<uint32_t> & indices) {
+        // TODO switch to tinygltf
+        tinyobj::attrib_t attrib;
+        std::vector<tinyobj::shape_t> shapes;
+        std::vector<tinyobj::material_t> materials;
+        std::string warn, err;
+        std::unordered_map<Vertex, uint32_t> uniqueVertices {};
+
+        // TODO wchar support?
+        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, pathFromProjectDir(filePath).string().c_str())) {
+            std::print("Error loading model from path {}: {} {}", pathFromProjectDir(filePath).string(), warn, err);
+            return false;
+        }
+
+        for (const auto & shape : shapes) {
+            for (const auto & index : shape.mesh.indices) {
+                Vertex vertex {};
+                vertex.pos = {
+                    attrib.vertices[3 * index.vertex_index + 0],
+                    attrib.vertices[3 * index.vertex_index + 1],
+                    attrib.vertices[3 * index.vertex_index + 2]
+                };
+
+                // OBJ assumes 0 = bottom of the image, but Vulkan works with 0 = top of the image, so we flip y coord
+                vertex.texCoord = {
+                    attrib.texcoords[2 * index.texcoord_index + 0],
+                    1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
+                };
+                vertex.color = {1.0f, 1.0f, 1.0f};
+
+                if (!uniqueVertices.contains(vertex)) {
+                    uniqueVertices[vertex] = static_cast<uint32_t>(vertices.size());
+                    vertices.push_back(vertex);
+                }
+
+                indices.push_back(uniqueVertices[vertex]);
+            }
+        }
+
+        return true;
+    }
+
+    void createVertexBuffer(std::vector<Vertex> & vertices) {
+        // TODO look into using memory barriers
+        auto [buffer, bufferMemory] = Locator::getVulkanResourceService()->createVulkanBuffer(
+            sizeof(vertices[0]) * vertices.size(),
+            vk::BufferUsageFlagBits::eVertexBuffer,
+            vertices
+        );
+
+        m_VertexBuffer = buffer;
+        m_VertexBufferMemory = bufferMemory;
+    }
+
+    void createIndexBuffer(std::vector<uint32_t> & indices) {
+        // TODO optimize memory allocation for read-heavy access patterns, add index format validation (16-bit vs 32-bit)
+        auto [buffer, bufferMemory] = Locator::getVulkanResourceService()->createVulkanBuffer(
+            sizeof(indices[0]) * indices.size(),
+            vk::BufferUsageFlagBits::eIndexBuffer,
+            indices
+        );
+
+        m_IndexBuffer = buffer;
+        m_IndexBufferMemory = bufferMemory;
+    }
+private:
+    // Vertex data management - stores per-vertex attributes like position, normal, uv coords
+    vk::Buffer m_VertexBuffer = nullptr;                    // GPU buffer containing vertex attribute data
+    vk::DeviceMemory m_VertexBufferMemory = nullptr;        // GPU memory backing the vertex buffer
+    vk::DeviceSize m_VertexBufferOffset = 0;                // Offset within the memory allocation for vertex buffer
+    uint32_t m_VertexCount = 0;                             // Number of vertices in this mesh
+
+    // Index data management - defines triangle connectivity using vertex indices
+    vk::Buffer m_IndexBuffer = nullptr;                     // GPU buffer containing triangle index data
+    vk::DeviceMemory m_IndexBufferMemory = nullptr;         // GPU memory backing the index buffer
+    vk::DeviceSize m_IndexBufferOffset = 0;                 // Offset within the memory allocation for index buffer
+    uint32_t m_IndexCount = 0;                              // Number of indices in this mesh (typically 3 per triangle)
 };

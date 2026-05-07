@@ -141,7 +141,8 @@ target_sources(VulkanHppTutorial PUBLIC
         src/core/platform.cppm
         src/ecs.cppm
         src/resource/resource.cppm
-        src/render/vulkan_resource_service.cppm src/render/render_engine.cppm src/render/camera.cppm src/render/render_locator.cppm
+        src/render/vulkan_resource_service.cppm src/render/render_engine.cppm src/render/camera.cppm
+        src/render/render_locator.cppm src/render/render_types.cppm
 )
 
 target_compile_definitions(VulkanHppTutorial PRIVATE USE_CPP20_MODULES=1)

@@ -5,6 +5,8 @@ export module ecs;
 import std;
 import glm;
 
+import resource;
+
 // ------------------------------------------------------------------------------------------
 // Base class definitions
 // ------------------------------------------------------------------------------------------
@@ -278,7 +280,6 @@ private:
 };
 
 // TODO remove temporary forward declarations
-class Mesh;
 class Material;
 
 // Mesh component
@@ -303,6 +304,7 @@ public:
         return m_Material;
     }
 
+protected:
     void render() override {
         if (!m_Mesh || !m_Material) return;
 

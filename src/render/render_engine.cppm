@@ -16,6 +16,7 @@ import std.compat;
 import camera;
 import vulkan_resource_service;
 import render_service_locator;
+import render_types;
 import resource;
 import platform;
 
@@ -28,7 +29,7 @@ import tinyobjloader;
 
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
-const std::string MODEL_PATH = "assets/viking_room.obj";
+const std::string MODEL_NAME = "viking_room";
 const std::string TEXTURE_NAME = "viking_room";
 
 const std::vector<char const *> validationLayers = {
@@ -42,44 +43,6 @@ constexpr bool enableValidationLayers = true;
 #endif // NDEBUG
 
 constexpr int MAX_FRAMES_IN_FLIGHT = 2;
-
-struct Vertex {
-    glm::vec3 pos;
-    glm::vec3 color;
-    glm::vec2 texCoord;
-
-    static vk::VertexInputBindingDescription getBindingDescription() {
-        return {.binding = 0, .stride = sizeof(Vertex), .inputRate = vk::VertexInputRate::eVertex};
-    }
-
-    static std::array<vk::VertexInputAttributeDescription, 3> getAttributeDescriptions() {
-        return {
-            vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, pos)),
-            vk::VertexInputAttributeDescription(1, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, color)),
-            vk::VertexInputAttributeDescription(2, 0, vk::Format::eR32G32Sfloat, offsetof(Vertex, texCoord))
-        };
-    }
-
-    bool operator==(const Vertex& other) const {
-        return pos == other.pos && color == other.color && texCoord == other.texCoord;
-    }
-};
-
-// Hash function for Vertex struct
-template<> struct std::hash<Vertex> {
-    size_t operator()(Vertex const & vertex) const noexcept {
-        return ((hash<glm::vec3>()(vertex.pos) ^
-                (hash<glm::vec3>()(vertex.color) << 1)) << 1) ^
-            (hash<glm::vec2>()(vertex.texCoord) << 1);
-    }
-};
-
-// Use alignas to make sure all variables are always aligned the way Vulkan expects them to be
-struct UniformBufferObject {
-    alignas(16) glm::mat4 model;
-    alignas(16) glm::mat4 view;
-    alignas(16) glm::mat4 proj;
-};
 
 // Upper layer of the renderer, performs rendering and interfaces with the resource manager
 export class RenderEngine {
@@ -164,8 +127,6 @@ private:
         createDepthResources();
         loadTexture();
         loadModel();
-        createVertexBuffer();
-        createIndexBuffer();
         createUniformBuffers();
         createDescriptorPool();
         createDescriptorSets();
@@ -222,12 +183,6 @@ private:
         deviceHandle.destroyImageView(m_ColorImageView);
         deviceHandle.destroyImage(m_ColorImage);
         deviceHandle.freeMemory(m_ColorImageMemory);
-
-        deviceHandle.freeMemory(m_VertexBufferMemory);
-        deviceHandle.destroyBuffer(m_VertexBuffer);
-
-        deviceHandle.freeMemory(m_IndexBufferMemory);
-        deviceHandle.destroyBuffer(m_IndexBuffer);
 
         for (const auto & uniformBuffer : m_UniformBuffers) {
             deviceHandle.unmapMemory(uniformBuffer.bufferMemory);
@@ -812,63 +767,7 @@ private:
     }
 
     void loadModel() {
-        tinyobj::attrib_t attrib;
-        std::vector<tinyobj::shape_t> shapes;
-        std::vector<tinyobj::material_t> materials;
-        std::string warn, err;
-        std::unordered_map<Vertex, uint32_t> uniqueVertices {};
-
-        // TODO wchar support?
-        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, pathFromProjectDir(MODEL_PATH).string().c_str())) {
-            throw std::runtime_error(warn + err);
-        }
-
-        for (const auto & shape : shapes) {
-            for (const auto & index : shape.mesh.indices) {
-                Vertex vertex {};
-                vertex.pos = {
-                    attrib.vertices[3 * index.vertex_index + 0],
-                    attrib.vertices[3 * index.vertex_index + 1],
-                    attrib.vertices[3 * index.vertex_index + 2]
-                };
-
-                // OBJ assumes 0 = bottom of the image, but Vulkan works with 0 = top of the image, so we flip y coord
-                vertex.texCoord = {
-                    attrib.texcoords[2 * index.texcoord_index + 0],
-                    1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
-                };
-                vertex.color = {1.0f, 1.0f, 1.0f};
-
-                if (!uniqueVertices.contains(vertex)) {
-                    uniqueVertices[vertex] = static_cast<uint32_t>(m_Vertices.size());
-                    m_Vertices.push_back(vertex);
-                }
-
-                m_Indices.push_back(uniqueVertices[vertex]);
-            }
-        }
-    }
-
-    void createVertexBuffer() {
-        vk::DeviceSize bufferSize = sizeof(m_Vertices[0]) * m_Vertices.size();
-
-        auto [buffer, bufferMemory] = m_VulkanResourceService->createVulkanBuffer(
-            bufferSize, vk::BufferUsageFlagBits::eVertexBuffer, m_Vertices
-        );
-
-        m_VertexBuffer = buffer;
-        m_VertexBufferMemory = bufferMemory;
-    }
-
-    void createIndexBuffer() {
-        vk::DeviceSize bufferSize = sizeof(m_Indices[0]) * m_Indices.size();
-
-        auto [buffer, bufferMemory] = m_VulkanResourceService->createVulkanBuffer(
-            bufferSize, vk::BufferUsageFlagBits::eIndexBuffer, m_Indices
-        );
-
-        m_IndexBuffer = buffer;
-        m_IndexBufferMemory = bufferMemory;
+        auto modelHandle = m_ResourceManager.load<Mesh>(MODEL_NAME);
     }
 
     vk::raii::CommandBuffer beginSingleTimeCommands() {
@@ -1045,16 +944,19 @@ private:
 
         commandBuffer.beginRendering(renderingInfo);
 
+        // TODO: is this efficient to do every time we record the command buffer? (I assume not)
+        const auto vikingRoomMesh = m_ResourceManager.getResource<Mesh>(MODEL_NAME);
+
         commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *m_GraphicsPipeline);
-        commandBuffer.bindVertexBuffers(0, m_VertexBuffer, {0});
-        commandBuffer.bindIndexBuffer(m_IndexBuffer, 0, vk::IndexType::eUint32);
+        commandBuffer.bindVertexBuffers(0, vikingRoomMesh->getVertexBuffer(), {0});
+        commandBuffer.bindIndexBuffer(vikingRoomMesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
         commandBuffer.setViewport(0, vk::Viewport(
             0.0f, 0.0f,
             static_cast<float>(m_SwapChainExtent.width), static_cast<float>(m_SwapChainExtent.height),
             0.0f, 1.0f));
         commandBuffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), m_SwapChainExtent));
         commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_PipelineLayout, 0, *m_DescriptorSets[m_FrameIndex], nullptr);
-        commandBuffer.drawIndexed(m_Indices.size(), 1, 0, 0, 0);
+        commandBuffer.drawIndexed(vikingRoomMesh->getIndexCount(), 1, 0, 0, 0);
 
         commandBuffer.endRendering();
 
@@ -1154,7 +1056,7 @@ private:
     void recompileShadersAndRecreatePipeline() {
         m_Device.waitIdle();
 
-        recompileShader("shaders/shader.slang", "shaders/slang.spv");
+        compileShader("shaders/shader.slang", "shaders/slang.spv");
         m_GraphicsPipeline.clear();
         createGraphicsPipeline();
         m_ShadersSetToReload = false;
@@ -1205,13 +1107,6 @@ private:
     // It's also good to use a memory allocator on top of it all, like VMA. We are not doing it
     // here because it would be slightly overkill for drawing just a couple simple shapes.
     // We'll optimize this once there's an actual need/reason to do so.
-
-    std::vector<Vertex>  m_Vertices;
-    std::vector<uint32_t> m_Indices;
-    vk::Buffer m_VertexBuffer = nullptr;
-    vk::DeviceMemory m_VertexBufferMemory = nullptr;
-    vk::Buffer m_IndexBuffer = nullptr;
-    vk::DeviceMemory m_IndexBufferMemory = nullptr;
 
     std::vector<VulkanUniformBufferData> m_UniformBuffers {};
 

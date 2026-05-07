@@ -26,7 +26,7 @@ export std::filesystem::path pathFromProjectDir(const std::string & relativePath
 }
 
 // TODO cleanup this code/swap over to using Slang's compilation API
-export void recompileShader(const std::string & shaderPathFromProjectFolder, const std::string & outputPathFromProjectFolder) {
+export void compileShader(const std::string & shaderPathFromProjectFolder, const std::string & outputPathFromProjectFolder) {
 #if defined(_WIN32)
     STARTUPINFO si {};
     si.cb = sizeof(si);
