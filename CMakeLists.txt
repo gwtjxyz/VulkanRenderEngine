@@ -25,7 +25,7 @@ find_package (Vulkan REQUIRED)
 find_package(stb REQUIRED)
 find_package (tinyobjloader REQUIRED)
 #find_package (tinygltf REQUIRED)
-#find_package (KTX REQUIRED)
+find_package (KTX REQUIRED)
 
 # Add option to enable/disable C++ 20 module
 option(ENABLE_CPP20_MODULE "Enable C++ 20 module support for Vulkan" ON)
@@ -58,7 +58,8 @@ if(ENABLE_CPP20_MODULE)
     add_library(Vulkan::cppm ALIAS VulkanCppModule)
 
     target_compile_definitions(VulkanCppModule
-            PUBLIC VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
+            PUBLIC
+#            VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1           TODO figure out why this broke
             VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1
             VK_ENABLE_BETA_EXTENSIONS                       # For MacOS support
     )
@@ -137,12 +138,15 @@ add_executable(VulkanHppTutorial src/main.cpp)
 # Compile modules
 target_sources(VulkanHppTutorial PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
-        src/platform.cppm src/render.cppm
+        src/core/platform.cppm
+        src/ecs.cppm
+        src/resource/resource.cppm
+        src/render/vulkan_resource_service.cppm src/render/render_engine.cppm src/render/camera.cppm src/render/render_locator.cppm
 )
 
 target_compile_definitions(VulkanHppTutorial PRIVATE USE_CPP20_MODULES=1)
 
-target_link_libraries(VulkanHppTutorial VulkanCppModule glfw glm-module stb::stb tinyobjloader-module)
+target_link_libraries(VulkanHppTutorial VulkanCppModule glfw glm-module stb::stb tinyobjloader-module KTX::ktx)
 
 # TODO Should this be somewhere else?
 if(MSVC)

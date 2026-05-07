@@ -1,9 +1,8 @@
 module;
 
-export module render;
+export module camera;
 
 import glm;
-import std;
 
 export enum class CameraMovement {
     FORWARD,

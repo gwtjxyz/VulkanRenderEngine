@@ -63,10 +63,25 @@ export void recompileShader(const std::string & shaderPathFromProjectFolder, con
 #endif
 }
 
-// STB Image wrapper
-export class TextureImage {
+export std::vector<char> readFile(const std::string & filename) {
+    // start reading at the end of file + read the file as binary
+    std::ifstream file(pathFromProjectDir(filename), std::ios::ate | std::ios::binary);
+
+    if (!file.is_open()) {
+        throw std::runtime_error("failed to open file " + filename);
+    }
+
+    std::vector<char> buffer(file.tellg());
+    file.seekg(0, std::ios::beg);
+    file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+    file.close();
+
+    return buffer;
+}
+
+export class StbImageWrapper {
 public:
-    explicit TextureImage(const std::string & pathToTexture) {
+    explicit StbImageWrapper(const std::string & pathToTexture) {
 #if defined(_WIN32)
         // Windows uses UTF-16, so I'm pretty sure we need to use wstring here
         auto absolutePath = pathFromProjectDir(pathToTexture).wstring();
@@ -80,16 +95,20 @@ public:
 #endif
     }
 
-    ~TextureImage() {
+    ~StbImageWrapper() {
         if (pixels) stbi_image_free(pixels);
     }
 
-    // explicitly delete copy constructor, move constructor, copy assignment operator, and move assignment operator
+    // delete copy constructor
+    StbImageWrapper(const StbImageWrapper & other) = delete;
 
-    TextureImage(const TextureImage & other) = delete;
-    TextureImage(TextureImage && other) = delete;
-    TextureImage & operator=(const TextureImage & other) = delete;
-    TextureImage & operator=(TextureImage && other) = delete;
+    // define move constructor
+    StbImageWrapper(StbImageWrapper && other) noexcept
+        : width(other.width), height(other.height), channels(other.channels), pixels(std::exchange(other.pixels, nullptr)) {}
+
+    // explicitly delete copy assignment operator and move assignment operator
+    StbImageWrapper & operator=(const StbImageWrapper & other) = delete;
+    StbImageWrapper & operator=(StbImageWrapper && other) = delete;
 public:
     int width{};
     int height{};
