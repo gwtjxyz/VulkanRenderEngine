@@ -274,9 +274,7 @@ private:
         model = glm::rotate(model, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
         ubo.model = glm::rotate(model, time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         ubo.view = m_Camera.getViewMatrix();
-        ubo.proj = m_Camera.getProjectionMatrix(
-            static_cast<float>(m_SwapChainExtent.width) / static_cast<float>(m_SwapChainExtent.height)
-        );
+        ubo.proj = m_Camera.getProjectionMatrix();
         ubo.proj[1][1] *= -1; // Vulkan's Y coordinate is inverted compared to OpenGL's, which glm was designed for originally
         memcpy(m_UniformBuffers[currentImage].mappedMemory, &ubo, sizeof(ubo));
     }
@@ -519,6 +517,11 @@ private:
 
         m_SwapChain = vk::raii::SwapchainKHR(m_Device, swapChainCreateInfo);
         m_SwapChainImages = m_SwapChain.getImages();
+
+        // Set aspect ratio for camera
+        m_Camera.updateAspectRatio(
+            static_cast<float>(m_SwapChainExtent.width) / static_cast<float>(m_SwapChainExtent.height)
+        );
     }
 
     static vk::SurfaceFormatKHR chooseSwapSurfaceFormat(std::vector<vk::SurfaceFormatKHR> const & availableFormats) {

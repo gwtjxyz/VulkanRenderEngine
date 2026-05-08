@@ -5,6 +5,7 @@ export module ecs;
 import std;
 import glm;
 
+import render_types;
 import resource;
 
 // ------------------------------------------------------------------------------------------
@@ -301,6 +302,9 @@ public:
         return m_Material;
     }
 
+    [[nodiscard]] BoundingBox getBoundingBox() const {
+        return BoundingBox{}; // TODO
+    }
 protected:
     void render() override {
         if (!m_Mesh || !m_Material) return;

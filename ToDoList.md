@@ -22,6 +22,14 @@
 - Placeholder textures/models (for when something fails to load)
 - Resource hot reloading
 
+### Entity Component system
+- Rewrite camera as an Entity with a Camera component
+- EntityManager
+
+### Rendering
+- Implement culling
+- 
+
 ## Completed
 
 - Shader hot reloading

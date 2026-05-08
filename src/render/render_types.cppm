@@ -52,3 +52,17 @@ export struct UniformBufferObject {
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 proj;
 };
+
+export struct Plane {
+    // Some point on the plane
+    glm::vec3 point = glm::vec3(0.0f);
+    // Plane's normal - unit vector
+    glm::vec3 normal = { 0.0f, 1.0f, 0.0f };
+};
+
+// TODO
+export struct BoundingBox {
+    void transform(const glm::mat4 & transformationMatrix) {
+        // TODO
+    }
+};

@@ -3,6 +3,7 @@ module;
 export module camera;
 
 import glm;
+import render_types;
 
 export enum class CameraMovement {
     FORWARD,
@@ -13,6 +14,21 @@ export enum class CameraMovement {
     DOWN
 };
 
+export struct Frustum {
+    Plane topFace;
+    Plane bottomFace;
+
+    Plane leftFace;
+    Plane rightFace;
+
+    Plane farFace;
+    Plane nearFace;
+
+    bool intersects(BoundingBox boundingBox) const {
+        return true; // TODO
+    }
+};
+
 // TODO: third-person camera
 // TODO: switch to quaternions eventually, once I have a UI to debug them
 export class Camera {
@@ -21,7 +37,7 @@ public:
         glm::vec3 position = glm::vec3(0.0f, 0.0f, 0.0f), // World origin start
         glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f), // Y-axis as world up
         float yaw = -90.0f, // Look along negative Z-axis (OpenGL convention)
-        float pitch = 0.0f // Level horizon
+        float pitch = 0.0f  // Level horizon,
     ) : m_Position(position), m_WorldUp(up) {
         m_Spin.pitch = pitch;
         m_Spin.yaw = yaw;
@@ -33,6 +49,9 @@ public:
         m_Zoom = 50.0f;
         m_MouseSensitivity = 0.1f;
         m_MovementSpeed = 2.5f;
+        m_AspectRatio = 16.0f / 9.0f;
+        m_Near = 0.1f;
+        m_Far = 100.0f;
     }
 
     [[nodiscard]] glm::mat4 getViewMatrix() const {
@@ -40,8 +59,8 @@ public:
         // return glm::translate(glm::toMat4(glm::quatLookAt(m_Front, m_Up)), m_Position);
     }
 
-    [[nodiscard]] glm::mat4 getProjectionMatrix(float aspectRatio, float nearPlane = 0.1f, float farPlane = 100.0f) const {
-        return glm::perspective(glm::radians(m_Zoom), aspectRatio, nearPlane, farPlane);
+    [[nodiscard]] glm::mat4 getProjectionMatrix() const {
+        return glm::perspective(glm::radians(m_Zoom), m_AspectRatio, m_Near, m_Far);
     }
 
     void processKeyboard(const CameraMovement direction, const float deltaTime) {
@@ -84,6 +103,26 @@ public:
         updateCameraVectors();
     }
 
+    Frustum getFrustum() const {
+        Frustum frustum;
+
+        const float halfVSide = m_Far * glm::tan(m_Zoom * 0.5f);
+        const float halfHSide = halfVSide * m_AspectRatio;
+        const glm::vec3 frontMultFar = m_Far * m_Front;
+
+        // Not sure if we should use fastDistance here; but maybe it's okay to compute this "slowly" every frame?
+        frustum.nearFace = { m_Position + m_Near * m_Front, m_Front };
+        frustum.farFace = { m_Position + frontMultFar, -m_Front };
+
+        // Do we need to normalize here?
+        frustum.leftFace = { m_Position, glm::cross(m_Up, frontMultFar + m_Right * halfHSide) };
+        frustum.rightFace = { m_Position, glm::cross(frontMultFar - m_Right * halfHSide, m_Up) };
+        frustum.topFace = { m_Position, glm::cross(m_Right, frontMultFar - m_Up * halfVSide) };
+        frustum.bottomFace = { m_Position, glm::cross(frontMultFar + m_Up * halfVSide, m_Right) };
+
+        return frustum;
+    }
+
     void processMouseScroll(float yOffset) {
         m_Zoom += yOffset;
     }
@@ -100,6 +139,9 @@ public:
         return m_Zoom;
     }
 
+    void updateAspectRatio(const float aspectRatio) {
+        m_AspectRatio = aspectRatio;
+    }
 private:
     // TODO use this somewhere else probably, or for interpolation
     // don't really need this for camera but I'll keep it as reference
@@ -168,5 +210,8 @@ private:
 
     float m_MovementSpeed{};
     float m_MouseSensitivity{};
-    float m_Zoom{};
+    float m_Zoom{};                 // Vertical FOV
+    float m_AspectRatio{};
+    float m_Near {};
+    float m_Far {};
 };
