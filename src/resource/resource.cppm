@@ -419,6 +419,7 @@ private:
 };
 
 // Shader resource
+// TODO finish and use (not fully ready for use yet - slang-compiled shaders with multiple entry points won't work)
 export class Shader : public Resource {
 public:
     Shader(const std::string & id, vk::ShaderStageFlagBits shaderStage)
@@ -443,7 +444,7 @@ protected:
             case vk::ShaderStageFlagBits::eVertex: extension = ".vert"; break;
             case vk::ShaderStageFlagBits::eFragment: extension = ".frag"; break;
             case vk::ShaderStageFlagBits::eCompute: extension = ".comp"; break;
-            case vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment: extension = ""; break;
+            // case vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment: extension = ""; break;
             default: return false;
         }
 
