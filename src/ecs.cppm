@@ -279,9 +279,6 @@ private:
     mutable bool m_TransformDirty = true;
 };
 
-// TODO remove temporary forward declarations
-class Material;
-
 // Mesh component
 // Manages the visual representation of an entity by handling its 3D mesh and material
 export class MeshComponent : public Component {

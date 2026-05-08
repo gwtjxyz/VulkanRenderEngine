@@ -279,8 +279,6 @@ private:
     int m_Width = 0;                          // Image width in pixels
     int m_Height = 0;                         // Image height in pixels
     int m_Channels = 0;                       // Number of color channels (RGB=3, RGBA=4, etc)
-
-    // Render resource service locator
 };
 
 export class Mesh : public Resource {
@@ -418,4 +416,67 @@ private:
     vk::DeviceMemory m_IndexBufferMemory = nullptr;         // GPU memory backing the index buffer
     vk::DeviceSize m_IndexBufferOffset = 0;                 // Offset within the memory allocation for index buffer
     uint32_t m_IndexCount = 0;                              // Number of indices in this mesh (typically 3 per triangle)
+};
+
+// Shader resource
+export class Shader : public Resource {
+public:
+    Shader(const std::string & id, vk::ShaderStageFlagBits shaderStage)
+        : Resource(id), m_Stage(shaderStage) {}
+
+    ~Shader() override {
+        unload();
+    }
+
+    [[nodiscard]] vk::ShaderModule getShaderModule() const {
+        return m_ShaderModule;
+    }
+
+    [[nodiscard]] vk::ShaderStageFlagBits getStage() const {
+        return m_Stage;
+    }
+protected:
+    bool doLoad() override {
+        // Determine file extension based on shader stage
+        std::string extension;
+        switch (m_Stage) {
+            case vk::ShaderStageFlagBits::eVertex: extension = ".vert"; break;
+            case vk::ShaderStageFlagBits::eFragment: extension = ".frag"; break;
+            case vk::ShaderStageFlagBits::eCompute: extension = ".comp"; break;
+            case vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment: extension = ""; break;
+            default: return false;
+        }
+
+        // Load shader from file
+        std::string filePath = "shaders/" + getId() + extension + ".spv";
+
+        // Read shader code
+        std::vector<char> shaderCode = readFile(filePath);
+
+        createShaderModule(shaderCode);
+
+        return true;
+    }
+
+    void doUnload() override {
+        if (isLoaded()) {
+            vk::Device device = Locator::getVulkanResourceService()->getDevice();
+
+            device.destroyShaderModule(m_ShaderModule);
+        }
+    }
+private:
+    void createShaderModule(const std::vector<char> & shaderCode) {
+        m_ShaderModule = Locator::getVulkanResourceService()->createShaderModule(shaderCode);
+    }
+private:
+    vk::ShaderModule m_ShaderModule = nullptr;
+    vk::ShaderStageFlagBits m_Stage{};
+};
+
+// TODO
+export class Material {
+public:
+
+private:
 };

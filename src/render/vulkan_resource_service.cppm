@@ -168,6 +168,16 @@ public:
         return depthResources;
     }
 
+    [[nodiscard]] vk::ShaderModule createShaderModule(const std::vector<char> & code) const {
+        vk::ShaderModuleCreateInfo createInfo = {
+            .codeSize = code.size() * sizeof(char),
+            .pCode = reinterpret_cast<const uint32_t*>(code.data())
+        };
+
+        vk::ShaderModule shaderModule = m_Device.createShaderModule(createInfo);
+        return shaderModule;
+    }
+
     [[nodiscard]] vk::Device getDevice() const {return m_Device; }
     [[nodiscard]] vk::PhysicalDevice getPhysicalDevice() const { return m_PhysicalDevice; }
     [[nodiscard]] vk::Queue getGraphicsQueue() const { return m_GraphicsQueue; }
