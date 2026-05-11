@@ -58,7 +58,7 @@ public:
         return imageData;
     }
 
-    template<typename T>
+    template <typename T>
     VulkanBufferData createVulkanBuffer(vk::DeviceSize bufferSize, vk::BufferUsageFlagBits bufferTypeFlags, std::vector<T> & data) {
         VulkanBufferData bufferData {};
 
@@ -106,11 +106,13 @@ public:
                 bufferMemory
             );
 
-            uniformBufferData.emplace_back(VulkanUniformBufferData {
-                buffer,
-                bufferMemory,
-                m_Device.mapMemory(bufferMemory, 0, bufferSize)
-            });
+            uniformBufferData.emplace_back(
+                VulkanUniformBufferData {
+                    buffer,
+                    bufferMemory,
+                    m_Device.mapMemory(bufferMemory, 0, bufferSize)
+                }
+            );
         }
 
         return uniformBufferData;
@@ -177,14 +179,14 @@ public:
     [[nodiscard]] vk::ShaderModule createShaderModule(const std::vector<char> & code) const {
         vk::ShaderModuleCreateInfo createInfo = {
             .codeSize = code.size() * sizeof(char),
-            .pCode = reinterpret_cast<const uint32_t*>(code.data())
+            .pCode = reinterpret_cast<const uint32_t *>(code.data())
         };
 
         vk::ShaderModule shaderModule = m_Device.createShaderModule(createInfo);
         return shaderModule;
     }
 
-    [[nodiscard]] vk::Device getDevice() const {return m_Device; }
+    [[nodiscard]] vk::Device getDevice() const { return m_Device; }
     [[nodiscard]] vk::PhysicalDevice getPhysicalDevice() const { return m_PhysicalDevice; }
     [[nodiscard]] vk::Queue getGraphicsQueue() const { return m_GraphicsQueue; }
     [[nodiscard]] vk::CommandPool getCommandPool() const { return m_CommandPool; }
@@ -204,6 +206,7 @@ public:
     void setCommandPool(const vk::raii::CommandPool & commandPool) {
         m_CommandPool = *commandPool;
     }
+
 private:
     void createTextureImage(const StbImageWrapper & textureImage, VulkanImageData & dstImageData) {
         vk::DeviceSize imageSize = textureImage.width * textureImage.height * 4; // TODO why 4 and not # of channels?
@@ -285,7 +288,7 @@ private:
         vk::ImageCreateInfo imageInfo = {
             .imageType = vk::ImageType::e2D,
             .format = format,
-            .extent = {width, height, 1},
+            .extent = { width, height, 1 },
             .mipLevels = mipLevels,
             .arrayLayers = 1,
             .samples = numSamples,
@@ -313,7 +316,7 @@ private:
             .oldLayout = oldLayout,
             .newLayout = newLayout,
             .image = image,
-            .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, mipLevels, 0, 1}
+            .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, mipLevels, 0, 1 }
         };
 
         vk::PipelineStageFlags sourceStage;
@@ -325,16 +328,13 @@ private:
 
             sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
             destinationStage = vk::PipelineStageFlagBits::eTransfer;
-        }
-        else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout ==
-            vk::ImageLayout::eShaderReadOnlyOptimal) {
+        } else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal) {
             barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
             barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
 
             sourceStage = vk::PipelineStageFlagBits::eTransfer;
             destinationStage = vk::PipelineStageFlagBits::eFragmentShader;
-        }
-        else {
+        } else {
             throw std::invalid_argument("Unsupported layout transition!");
         }
 
@@ -350,7 +350,7 @@ private:
         };
         vk::CommandBuffer commandBuffer = std::move(m_Device.allocateCommandBuffers(allocInfo).front());
 
-        vk::CommandBufferBeginInfo beginInfo{.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit};
+        vk::CommandBufferBeginInfo beginInfo { .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit };
         commandBuffer.begin(beginInfo);
 
         return commandBuffer;
@@ -359,7 +359,7 @@ private:
     void endSingleTimeCommands(vk::CommandBuffer & commandBuffer) {
         commandBuffer.end();
 
-        vk::SubmitInfo submitInfo{.commandBufferCount = 1, .pCommandBuffers = &commandBuffer};
+        vk::SubmitInfo submitInfo { .commandBufferCount = 1, .pCommandBuffers = &commandBuffer };
         m_GraphicsQueue.submit(submitInfo, nullptr);
         // using a fence instead of waitIdle() would allow us to schedule multiple transfer simultaneously and
         // wait for all of them to complete instead of executing one at a time. ( = likely better optimization)
@@ -370,13 +370,15 @@ private:
 
     void copyBuffer(vk::Buffer & srcBuffer, vk::Buffer & dstBuffer, vk::DeviceSize size) {
         auto commandCopyBuffer = beginSingleTimeCommands();
-        commandCopyBuffer.copyBuffer(srcBuffer ,dstBuffer, vk::BufferCopy(0, 0, size));
+        commandCopyBuffer.copyBuffer(srcBuffer, dstBuffer, vk::BufferCopy(0, 0, size));
         endSingleTimeCommands(commandCopyBuffer);
     }
 
     // TODO parametrize offset/don't create different buffers for every texture
-    void createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties,
-                      vk::Buffer & buffer, vk::DeviceMemory & bufferMemory) {
+    void createBuffer(
+        vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties,
+        vk::Buffer & buffer, vk::DeviceMemory & bufferMemory
+    ) {
         vk::BufferCreateInfo bufferInfo = {
             .size = size,
             .usage = usage,
@@ -412,18 +414,17 @@ private:
             .bufferOffset = 0,
             .bufferRowLength = 0,
             .bufferImageHeight = 0,
-            .imageSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
-            .imageOffset = {0, 0, 0},
-            .imageExtent = {width, height, 1}
+            .imageSubresource = { vk::ImageAspectFlagBits::eColor, 0, 0, 1 },
+            .imageOffset = { 0, 0, 0 },
+            .imageExtent = { width, height, 1 }
         };
-        commandBuffer.copyBufferToImage(buffer, image, vk::ImageLayout::eTransferDstOptimal, {region});
+        commandBuffer.copyBufferToImage(buffer, image, vk::ImageLayout::eTransferDstOptimal, { region });
         // Submit the buffer copy to the graphics queue
         endSingleTimeCommands(commandBuffer);
     }
 
     // TODO: Try implementing software resizing and/or loading multiple mip levels from a single file
-    void generateMipmaps(vk::Image & image, vk::Format imageFormat, int32_t texWidth, int32_t texHeight,
-                         uint32_t mipLevels) {
+    void generateMipmaps(vk::Image & image, vk::Format imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels) {
         // Check if image format supports linear blit-ing
         vk::FormatProperties formatProperties = m_PhysicalDevice.getFormatProperties(imageFormat);
         if (!(formatProperties.optimalTilingFeatures & vk::FormatFeatureFlagBits::eSampledImageFilterLinear)) {
@@ -456,8 +457,10 @@ private:
             barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
             barrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
 
-            commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer,
-                                          {}, {}, {}, barrier);
+            commandBuffer.pipelineBarrier(
+                vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer,
+                {}, {}, {}, barrier
+            );
 
             vk::ArrayWrapper1D<vk::Offset3D, 2> srcOffsets, dstOffsets;
             srcOffsets[0] = vk::Offset3D(0, 0, 0);
@@ -477,7 +480,7 @@ private:
                 vk::ImageLayout::eTransferSrcOptimal,
                 image,
                 vk::ImageLayout::eTransferDstOptimal,
-                {blit},
+                { blit },
                 vk::Filter::eLinear
             );
 
@@ -486,8 +489,10 @@ private:
             barrier.srcAccessMask = vk::AccessFlagBits::eTransferRead;
             barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
 
-            commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
-                                          vk::PipelineStageFlagBits::eFragmentShader, {}, {}, {}, barrier);
+            commandBuffer.pipelineBarrier(
+                vk::PipelineStageFlagBits::eTransfer,
+                vk::PipelineStageFlagBits::eFragmentShader, {}, {}, {}, barrier
+            );
 
             if (mipWidth > 1) mipWidth /= 2;
             if (mipHeight > 1) mipHeight /= 2;
@@ -499,21 +504,25 @@ private:
         barrier.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
         barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
         barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
-        commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eFragmentShader,
-                                      {}, {}, {}, barrier);
+        commandBuffer.pipelineBarrier(
+            vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eFragmentShader,
+            {}, {}, {}, barrier
+        );
 
         endSingleTimeCommands(commandBuffer);
     }
 
     // This function manually allocates image view memory, meaning it will need to be manually deallocated later
     [[nodiscard]]
-    vk::ImageView createImageView(const vk::Image & image, const vk::Format format,
-                                        vk::ImageAspectFlags aspectFlags, uint32_t mipLevels) const {
+    vk::ImageView createImageView(
+        const vk::Image & image, const vk::Format format,
+        vk::ImageAspectFlags aspectFlags, uint32_t mipLevels
+    ) const {
         vk::ImageViewCreateInfo viewInfo = {
             .image = image,
             .viewType = vk::ImageViewType::e2D,
             .format = format,
-            .subresourceRange = {aspectFlags, 0, mipLevels, 0, 1}
+            .subresourceRange = { aspectFlags, 0, mipLevels, 0, 1 }
         };
         return m_Device.createImageView(viewInfo);
     }
@@ -542,6 +551,7 @@ private:
 
         return m_Device.createSampler(samplerInfo);
     }
+
 private:
     // Storing hpp-wrapped Vulkan handles instead of RAII objects so that we can work with them through here
     // but still clean them up from elsewhere and not worry about deinitialization order
