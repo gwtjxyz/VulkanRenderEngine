@@ -116,56 +116,62 @@ public:
         return uniformBufferData;
     }
 
-    VulkanImageData createColorResources(const vk::Format colorFormat, const vk::Extent2D swapChainExtent, const vk::SampleCountFlagBits msaaSamples) {
-        VulkanImageData colorResources {};
-        // Vulkan spec enforces only 1 mip level for images with more than 1 sample per pixel
-        colorResources.mipLevels = 1;
+    VulkanImageData createGenericResources(
+        const vk::Format format,
+        const vk::Extent2D extent,
+        const vk::SampleCountFlagBits msaaSamples,
+        const vk::ImageUsageFlags usageFlags,
+        vk::MemoryPropertyFlags memoryProperties,
+        const uint32_t mipLevels,
+        vk::ImageAspectFlags aspectFlags
+    ) {
+        VulkanImageData resources {};
+        resources.mipLevels = mipLevels;
 
         createImage(
-            swapChainExtent.width,
-            swapChainExtent.height,
-            colorResources.mipLevels,
+            extent.width,
+            extent.height,
+            mipLevels,
             msaaSamples,
-            colorFormat,
+            format,
             vk::ImageTiling::eOptimal,
-            vk::ImageUsageFlagBits::eTransientAttachment | vk::ImageUsageFlagBits::eColorAttachment,
-            vk::MemoryPropertyFlagBits::eDeviceLocal,
-            colorResources.image,
-            colorResources.imageMemory
+            usageFlags,
+            memoryProperties,
+            resources.image,
+            resources.imageMemory
         );
-        colorResources.imageView = createImageView(
-            colorResources.image,
-            colorFormat,
-            vk::ImageAspectFlagBits::eColor,
-            colorResources.mipLevels
+        resources.imageView = createImageView(
+            resources.image,
+            format,
+            aspectFlags,
+            mipLevels
         );
 
-        return colorResources;
+        return resources;
+    }
+
+    VulkanImageData createColorResources(const vk::Format colorFormat, const vk::Extent2D swapChainExtent, const vk::SampleCountFlagBits msaaSamples) {
+        return createGenericResources(
+            colorFormat,
+            swapChainExtent,
+            msaaSamples,
+            vk::ImageUsageFlagBits::eTransientAttachment | vk::ImageUsageFlagBits::eColorAttachment,
+            vk::MemoryPropertyFlagBits::eDeviceLocal,
+            1,
+            vk::ImageAspectFlagBits::eColor
+        );
     }
 
     VulkanImageData createDepthResources(const vk::Format depthFormat, const vk::Extent2D swapChainExtent, const vk::SampleCountFlagBits msaaSamples) {
-        VulkanImageData depthResources {};
-        depthResources.mipLevels = 1;
-
-        createImage(
-            swapChainExtent.width,
-            swapChainExtent.height,
-            depthResources.mipLevels,
-            msaaSamples,
+        return createGenericResources(
             depthFormat,
-            vk::ImageTiling::eOptimal,
+            swapChainExtent,
+            msaaSamples,
             vk::ImageUsageFlagBits::eDepthStencilAttachment,
             vk::MemoryPropertyFlagBits::eDeviceLocal,
-            depthResources.image,
-            depthResources.imageMemory
+            1,
+            vk::ImageAspectFlagBits::eDepth
         );
-        depthResources.imageView = createImageView(
-            depthResources.image, depthFormat,
-            vk::ImageAspectFlagBits::eDepth,
-            depthResources.mipLevels
-        );
-
-        return depthResources;
     }
 
     [[nodiscard]] vk::ShaderModule createShaderModule(const std::vector<char> & code) const {
