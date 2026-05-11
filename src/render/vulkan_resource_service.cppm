@@ -176,6 +176,76 @@ public:
         );
     }
 
+    static void transitionImageLayout(
+        const vk::CommandBuffer & commandBuffer,
+        const vk::Image & image,
+        const vk::ImageLayout oldLayout,
+        const vk::ImageLayout newLayout,
+        const uint32_t mipLevels = 1
+    ) {
+        vk::ImageMemoryBarrier2 barrier = {
+            .oldLayout = oldLayout,
+            .newLayout = newLayout,
+            .srcQueueFamilyIndex = vk::QueueFamilyIgnored,
+            .dstQueueFamilyIndex = vk::QueueFamilyIgnored,
+            .image = image,
+            .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, mipLevels, 0, 1 }
+        };
+
+        // Undefined-to-transfer: common for preparing images for data uploads
+        if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eTransferDstOptimal) {
+            barrier.srcAccessMask = vk::AccessFlagBits2::eNone;
+            barrier.dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
+
+            barrier.srcStageMask = vk::PipelineStageFlagBits2::eAllCommands;
+            barrier.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
+
+            // Transfer-to-shader: prepares uploaded images for shader sampling
+        } else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal) {
+            barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+            barrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
+
+            barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
+            barrier.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
+
+            // Undefined-to-color: for transitioning swapchain and multisampled images
+        } else if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eColorAttachmentOptimal) {
+            barrier.srcAccessMask = vk::AccessFlagBits2::eNone;
+            barrier.dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
+
+            barrier.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+            barrier.dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+
+            // Undefined-to-depth: for transitioning depth image
+        } else if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eDepthAttachmentOptimal) {
+            barrier.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite;
+            barrier.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite;
+
+            barrier.srcStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests;
+            barrier.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests;
+            // Also change the aspect mask to depth instead of color
+            barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eDepth;
+
+            // Color-attachment-to-present: for resetting swapchain image after rendering it to the screen
+        } else if (oldLayout == vk::ImageLayout::eColorAttachmentOptimal && newLayout == vk::ImageLayout::ePresentSrcKHR) {
+            barrier.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
+            barrier.dstAccessMask = vk::AccessFlagBits2::eMemoryRead;
+
+            barrier.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+            barrier.dstStageMask = vk::PipelineStageFlagBits2::eAllCommands;
+        } else {
+            // Will add new layout combinations as needed
+            throw std::invalid_argument("Unsupported layout transition!");
+        }
+
+        vk::DependencyInfo dependencyInfo = {
+            .dependencyFlags = vk::DependencyFlagBits::eByRegion,
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &barrier,
+        };
+        commandBuffer.pipelineBarrier2(dependencyInfo);
+    }
+
     [[nodiscard]] vk::ShaderModule createShaderModule(const std::vector<char> & code) const {
         vk::ShaderModuleCreateInfo createInfo = {
             .codeSize = code.size() * sizeof(char),
@@ -208,8 +278,20 @@ public:
     }
 
 private:
+    void transitionImageLayout(
+        const vk::Image & image,
+        const vk::ImageLayout oldLayout,
+        const vk::ImageLayout newLayout,
+        const uint32_t mipLevels = 1
+    ) {
+        vk::CommandBuffer commandBuffer = beginSingleTimeCommands();
+        transitionImageLayout(commandBuffer, image, oldLayout, newLayout, mipLevels);
+        endSingleTimeCommands(commandBuffer);
+    }
+
     void createTextureImage(const StbImageWrapper & textureImage, VulkanImageData & dstImageData) {
-        vk::DeviceSize imageSize = textureImage.width * textureImage.height * 4; // TODO why 4 and not # of channels?
+        // multiplying by 4 instead of # of channels because we create image with the format of RGBA
+        vk::DeviceSize imageSize = textureImage.width * textureImage.height * 4;
 
         if (!textureImage.pixels) {
             throw std::runtime_error("failed to load texture image!");
@@ -305,41 +387,6 @@ private:
         };
         deviceMemory = m_Device.allocateMemory(allocInfo);
         m_Device.bindImageMemory(image, deviceMemory, 0);
-    }
-
-    void transitionImageLayout(
-        const vk::Image & image, const vk::ImageLayout oldLayout, const vk::ImageLayout newLayout, const uint32_t mipLevels
-    ) {
-        auto commandBuffer = beginSingleTimeCommands();
-
-        vk::ImageMemoryBarrier barrier = {
-            .oldLayout = oldLayout,
-            .newLayout = newLayout,
-            .image = image,
-            .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, mipLevels, 0, 1 }
-        };
-
-        vk::PipelineStageFlags sourceStage;
-        vk::PipelineStageFlags destinationStage;
-
-        if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eTransferDstOptimal) {
-            barrier.srcAccessMask = {};
-            barrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
-
-            sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
-            destinationStage = vk::PipelineStageFlagBits::eTransfer;
-        } else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal) {
-            barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
-            barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
-
-            sourceStage = vk::PipelineStageFlagBits::eTransfer;
-            destinationStage = vk::PipelineStageFlagBits::eFragmentShader;
-        } else {
-            throw std::invalid_argument("Unsupported layout transition!");
-        }
-
-        commandBuffer.pipelineBarrier(sourceStage, destinationStage, {}, {}, nullptr, barrier);
-        endSingleTimeCommands(commandBuffer);
     }
 
     vk::CommandBuffer beginSingleTimeCommands() {

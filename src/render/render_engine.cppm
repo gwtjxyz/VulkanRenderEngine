@@ -881,36 +881,25 @@ private:
         commandBuffer.begin( {} );
 
         // Before starting rendering, transition the swapchain image to COLOR_ATTACHMENT_OPTIMAL
-        transitionImageLayout(
+        m_VulkanResourceService->transitionImageLayout(
+            *commandBuffer,
             m_SwapChainImages[imageIndex],
             vk::ImageLayout::eUndefined,
-            vk::ImageLayout::eColorAttachmentOptimal,
-            {},
-            vk::AccessFlagBits2::eColorAttachmentWrite,
-            vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-            vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-            vk::ImageAspectFlagBits::eColor
+            vk::ImageLayout::eColorAttachmentOptimal
         );
-        transitionImageLayout(
+        // Transition multisampled image to COLOR_ATTACHMENT_OPTIMAL
+        m_VulkanResourceService->transitionImageLayout(
+            *commandBuffer,
             m_ColorImage,
             vk::ImageLayout::eUndefined,
-            vk::ImageLayout::eColorAttachmentOptimal,
-            vk::AccessFlagBits2::eColorAttachmentWrite,
-            vk::AccessFlagBits2::eColorAttachmentWrite,
-            vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-            vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-            vk::ImageAspectFlagBits::eColor
+            vk::ImageLayout::eColorAttachmentOptimal
         );
         // Transition depth image to DEPTH_ATTACHMENT_OPTIMAL
-        transitionImageLayout(
+        m_VulkanResourceService->transitionImageLayout(
+            *commandBuffer,
             m_DepthImage,
             vk::ImageLayout::eUndefined,
-            vk::ImageLayout::eDepthAttachmentOptimal,
-            vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-            vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-            vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
-            vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
-            vk::ImageAspectFlagBits::eDepth
+            vk::ImageLayout::eDepthAttachmentOptimal
         );
 
         vk::ClearValue clearColor = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f);
@@ -964,56 +953,15 @@ private:
         commandBuffer.endRendering();
 
         // After rendering, transition the swapchain image to PRESENT_SRC
-        transitionImageLayout(
+
+        m_VulkanResourceService->transitionImageLayout(
+            *commandBuffer,
             m_SwapChainImages[imageIndex],
             vk::ImageLayout::eColorAttachmentOptimal,
-            vk::ImageLayout::ePresentSrcKHR,
-            vk::AccessFlagBits2::eColorAttachmentWrite,
-            {},
-            vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-            vk::PipelineStageFlagBits2::eBottomOfPipe,
-            vk::ImageAspectFlagBits::eColor
+            vk::ImageLayout::ePresentSrcKHR
         );
 
         commandBuffer.end();
-    }
-
-    // Keeping this here isntead of moving it to the resource service for now because this is used
-    // For recording command buffers for drawing, not necessarily resource allocation
-    void transitionImageLayout(
-        vk::Image image,
-        vk::ImageLayout oldLayout,
-        vk::ImageLayout newLayout,
-        vk::AccessFlags2 srcAccessMask,
-        vk::AccessFlags2 dstAccessMask,
-        vk::PipelineStageFlags2 srcStageMask,
-        vk::PipelineStageFlags2 dstStageMask,
-        vk::ImageAspectFlags imageAspectFlags
-    ) {
-        vk::ImageMemoryBarrier2 barrier = {
-            .srcStageMask = srcStageMask,
-            .srcAccessMask = srcAccessMask,
-            .dstStageMask = dstStageMask,
-            .dstAccessMask = dstAccessMask,
-            .oldLayout = oldLayout,
-            .newLayout = newLayout,
-            .srcQueueFamilyIndex = vk::QueueFamilyIgnored,
-            .dstQueueFamilyIndex = vk::QueueFamilyIgnored,
-            .image = image,
-            .subresourceRange = {
-                .aspectMask = imageAspectFlags,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = 1
-            }
-        };
-        vk::DependencyInfo dependencyInfo = {
-            .dependencyFlags = {},
-            .imageMemoryBarrierCount = 1,
-            .pImageMemoryBarriers = &barrier
-        };
-        m_CommandBuffers[m_FrameIndex].pipelineBarrier2(dependencyInfo);
     }
 
     void createSyncObjects() {
@@ -1034,6 +982,18 @@ private:
         m_SwapChain = nullptr; // doing this automatically calls the destructor which in turn calls swapChain.clear()
     }
 
+    void cleanupColorResources(const vk::Device & device) {
+        device.destroyImageView(m_ColorImageView);
+        device.destroyImage(m_ColorImage);
+        device.freeMemory(m_ColorImageMemory);
+    }
+
+    void cleanupDepthResources(const vk::Device & device) {
+        device.destroyImageView(m_DepthImageView);
+        device.destroyImage(m_DepthImage);
+        device.freeMemory(m_DepthImageMemory);
+    }
+
     void recreateSwapChain() {
         // Note: it's possible to do this differently - here we need to stop all renderings before creating
         // the new swap chain. Alternatively, we can create a new swap chain while still drawing to the old swap chain
@@ -1049,10 +1009,14 @@ private:
 
         m_Device.waitIdle();
 
+        const auto & deviceHandle = *m_Device;
+
         cleanupSwapChain();
         createSwapChain();
         createImageViews();
+        cleanupColorResources(deviceHandle);
         createColorResources();
+        cleanupDepthResources(deviceHandle);
         createDepthResources();
     }
 

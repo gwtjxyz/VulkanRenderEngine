@@ -312,43 +312,52 @@ public:
 
             // Transition input resources to shader-readable layouts
             for (const auto & input : pass.inputs) {
-                auto & resource = m_Resources[input];
+                const auto & resource = m_Resources[input];
 
-                transitionImageLayout(
-                    resource.initialLayout,
-                    vk::ImageLayout::eShaderReadOnlyOptimal,
+                m_VulkanResourceService->transitionImageLayout(
+                    commandBuffer,
                     resource.image,
-                    vk::ImageAspectFlagBits::eColor,
-                    vk::AccessFlagBits2::eMemoryWrite,
-                    vk::AccessFlagBits2::eShaderRead,
-                    vk::PipelineStageFlagBits2::eAllCommands,
-                    vk::PipelineStageFlagBits2::eFragmentShader,
-                    commandBuffer
+                    resource.initialLayout,
+                    vk::ImageLayout::eShaderReadOnlyOptimal
                 );
 
                 // transitionImageLayout(
-                //     commandBuffer,
-                //     resource.image,
                 //     resource.initialLayout,
-                //     vk::ImageLayout::eShaderReadOnlyOptimal
+                //     vk::ImageLayout::eShaderReadOnlyOptimal,
+                //     resource.image,
+                //     vk::ImageAspectFlagBits::eColor,
+                //     vk::AccessFlagBits2::eMemoryWrite,
+                //     vk::AccessFlagBits2::eShaderRead,
+                //     vk::PipelineStageFlagBits2::eAllCommands,
+                //     vk::PipelineStageFlagBits2::eFragmentShader,
+                //     commandBuffer
                 // );
             }
 
             // Transition output resources to render target layouts
             for (const auto & output : pass.outputs) {
-                auto & resource = m_Resources[output];
+                const auto & resource = m_Resources[output];
 
-                transitionImageLayout(
-                    resource.initialLayout,
-                    vk::ImageLayout::eColorAttachmentOptimal,
+                m_VulkanResourceService->transitionImageLayout(
+                    commandBuffer,
                     resource.image,
-                    vk::ImageAspectFlagBits::eColor,
-                    vk::AccessFlagBits2::eMemoryRead,
-                    vk::AccessFlagBits2::eColorAttachmentWrite,
-                    vk::PipelineStageFlagBits2::eAllCommands,
-                    vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-                    commandBuffer
+                    resource.initialLayout,
+                    vk::ImageLayout::eColorAttachmentOptimal
                 );
+
+                // m_VulkanResourceService->transitionImageLayout(
+                //     commandBuffer,
+                //     resource.image,
+                //     resource.initialLayout,
+                //     vk::ImageLayout::eColorAttachmentOptimal,
+                //     resource.image,
+                //     vk::ImageAspectFlagBits::eColor,
+                //     vk::AccessFlagBits2::eMemoryRead,
+                //     vk::AccessFlagBits2::eColorAttachmentWrite,
+                //     vk::PipelineStageFlagBits2::eAllCommands,
+                //     vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+                //     commandBuffer
+                // );
             }
 
             // Pass execution - execute the actual rendering logic
@@ -360,17 +369,24 @@ public:
             for (const auto & output : pass.outputs) {
                 auto & resource = m_Resources[output];
 
-                transitionImageLayout(
-                    vk::ImageLayout::eColorAttachmentOptimal,
-                    resource.finalLayout,
+                m_VulkanResourceService->transitionImageLayout(
+                    commandBuffer,
                     resource.image,
-                    vk::ImageAspectFlagBits::eColor,
-                    vk::AccessFlagBits2::eColorAttachmentWrite,
-                    vk::AccessFlagBits2::eMemoryRead,
-                    vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-                    vk::PipelineStageFlagBits2::eAllCommands,
-                    commandBuffer
+                    vk::ImageLayout::eColorAttachmentOptimal,
+                    resource.finalLayout
                 );
+
+                // transitionImageLayout(
+                //     vk::ImageLayout::eColorAttachmentOptimal,
+                //     resource.finalLayout,
+                //     resource.image,
+                //     vk::ImageAspectFlagBits::eColor,
+                //     vk::AccessFlagBits2::eColorAttachmentWrite,
+                //     vk::AccessFlagBits2::eMemoryRead,
+                //     vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+                //     vk::PipelineStageFlagBits2::eAllCommands,
+                //     commandBuffer
+                // );
             }
 
             // Command submission with synchronization
@@ -391,7 +407,6 @@ public:
     }
 
 private:
-#if 1
     void transitionImageLayout(
         vk::ImageLayout oldLayout,
         vk::ImageLayout newLayout,
@@ -422,55 +437,7 @@ private:
 
         commandBuffer.pipelineBarrier2(dependencyInfo);
     }
-#else
-    // TODO make this usable
-    void transitionImageLayout(
-        vk::CommandBuffer & commandBuffer,
-        vk::Image image,
-        vk::ImageLayout oldLayout,
-        vk::ImageLayout newLayout
-    ) {
-        vk::ImageMemoryBarrier2 barrier;
-        barrier.setOldLayout(oldLayout)
-            .setNewLayout(newLayout)
-            .setSrcQueueFamilyIndex(vk::QueueFamilyIgnored)
-            .setDstQueueFamilyIndex(vk::QueueFamilyIgnored)
-            .setImage(image);
 
-        if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eTransferDstOptimal) {
-            // Common for preparing images for data uploads
-            barrier.setSrcAccessMask(vk::AccessFlagBits2::eNone)                // No previous access to synchronize
-                .setDstAccessMask(vk::AccessFlagBits2::eTransferWrite)          // Enable transfer write ops
-                .setSrcStageMask(vk::PipelineStageFlagBits2::eTopOfPipe)        // No previous work to wait for
-                .setDstStageMask(vk::PipelineStageFlagBits2::eTransfer)         // Transfer operations can proceed
-                .setSubresourceRange({ vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 });
-        } else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal) {
-            // Transfer-to-shader layout transitions
-            barrier.setSrcAccessMask(vk::AccessFlagBits2::eTransferWrite)       // Previous transfer writes must complete
-                .setDstAccessMask(vk::AccessFlagBits2::eShaderRead)             // Enable shader read access
-                .setSrcStageMask(vk::PipelineStageFlagBits2::eTransfer)         // Transfer ops must complete
-                .setDstStageMask(vk::PipelineStageFlagBits2::eFragmentShader)   // Fragment shaders can access
-                .setSubresourceRange({ vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 });
-        } else if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eDepthAttachmentOptimal) {
-            // Depth image transition
-            barrier.setSrcAccessMask(vk::AccessFlagBits2::eDepthStencilAttachmentWrite)     // TODO shouldn't this be "read" instead?
-                .setDstAccessMask(vk::AccessFlagBits2::eDepthStencilAttachmentWrite)
-                .setSrcStageMask(vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests)
-                .setDstStageMask(vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests)
-                .setSubresourceRange({ vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1 });
-        } else {
-            // Handle unsupported transition combinations
-            // Could include additional common transition patterns as well
-            throw std::invalid_argument("Unsupported layout transition!");
-        }
-
-        vk::DependencyInfo dependencyInfo;
-        dependencyInfo.setDependencyFlags(vk::DependencyFlagBits::eByRegion)
-            .setImageMemoryBarrierCount(1)
-            .setImageMemoryBarriers(barrier);
-        commandBuffer.pipelineBarrier2(dependencyInfo);
-    }
-#endif
     // Core data storage for the rendergraph system
     std::unordered_map<std::string, Resource> m_Resources;              // All resources referenced in the graph
     std::vector<RenderPass> m_RenderPasses;                             // All rendering passes in definition order
