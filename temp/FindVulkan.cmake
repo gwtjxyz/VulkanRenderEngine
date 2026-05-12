@@ -617,7 +617,7 @@ if(Vulkan_INCLUDE_DIR)
             list(REMOVE_AT VulkanHeaderVersion2 0)
         endif()
         list(APPEND VulkanHeaderVersion2 ${VulkanHeaderVersion})
-        list(JOIN VulkanHeaderVersion2 "." Vulkan_VERSION)
+        list(JOIN VulkanHeaderVersion2 "../CMake" Vulkan_VERSION)
     endif()
 endif()
 
