@@ -25,7 +25,7 @@ find_package (glfw3 REQUIRED)
 find_package (glm REQUIRED)
 find_package(stb REQUIRED)
 find_package (tinyobjloader REQUIRED)
-#find_package (tinygltf REQUIRED)
+find_package (tinygltf REQUIRED)
 find_package (KTX REQUIRED)
 
 # Fetch latest Vulkan headers if the installed ones are out of date
@@ -143,12 +143,11 @@ target_sources(VulkanRenderEngine PUBLIC
         src/resource/resource.cppm
         src/render/vulkan_resource_service.cppm src/render/render_engine.cppm src/render/camera.cppm
         src/render/render_locator.cppm src/render/render_types.cppm src/render/culling_system.cppm
-        src/render/rendergraph.cppm
 )
 
 target_compile_definitions(VulkanRenderEngine PRIVATE USE_CPP20_MODULES=1)
 
-target_link_libraries(VulkanRenderEngine PRIVATE Vulkan-HppModule glfw glm-module stb::stb tinyobjloader-module KTX::ktx)
+target_link_libraries(VulkanRenderEngine PRIVATE Vulkan-HppModule glfw glm-module stb::stb tinyobjloader-module KTX::ktx tinygltf::tinygltf)
 
 # TODO Should this be somewhere else?
 if(MSVC)

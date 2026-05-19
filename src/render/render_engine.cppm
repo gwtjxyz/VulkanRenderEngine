@@ -14,6 +14,7 @@ export module render_engine;
 import std.compat;
 
 import camera;
+import ecs;
 import vulkan_resource_service;
 import render_service_locator;
 import render_types;
@@ -134,14 +135,14 @@ private:
         createLogicalDevice();
         createSwapChain();
         createImageViews();
-        createDescriptorSetLayout();
-        createGraphicsPipeline();
         createCommandPool();
-        createColorResources();
-        createDepthResources();
         loadTexture();
         loadModel();
-        createUniformBuffers();
+        createDescriptorSetLayout();
+        createGraphicsPipeline();
+        createColorResources();
+        createDepthResources();
+        createShaderBuffers();
         createDescriptorPool();
         createDescriptorSets();
         createCommandBuffers();
@@ -190,18 +191,13 @@ private:
         // Render-specific image views
         const vk::Device deviceHandle = *m_Device;
 
-        deviceHandle.destroyImageView(m_DepthImageView);
-        deviceHandle.destroyImage(m_DepthImage);
-        deviceHandle.freeMemory(m_DepthImageMemory);
+        m_VulkanResourceService->freeResources(m_DepthImage, m_DepthImageMemory, m_DepthImageView);
+        m_VulkanResourceService->freeResources(m_ColorImage, m_ColorImageMemory, m_ColorImageView);
 
-        deviceHandle.destroyImageView(m_ColorImageView);
-        deviceHandle.destroyImage(m_ColorImage);
-        deviceHandle.freeMemory(m_ColorImageMemory);
-
-        for (const auto & uniformBuffer : m_UniformBuffers) {
-            deviceHandle.unmapMemory(uniformBuffer.bufferMemory);
-            deviceHandle.freeMemory(uniformBuffer.bufferMemory);
-            deviceHandle.destroyBuffer(uniformBuffer.buffer);
+        for (const auto & shaderDataBuffer : m_ShaderDataBuffers) {
+            deviceHandle.unmapMemory(shaderDataBuffer.bufferMemory);
+            deviceHandle.freeMemory(shaderDataBuffer.bufferMemory);
+            deviceHandle.destroyBuffer(shaderDataBuffer.buffer);
         }
 
         m_ResourceManager.unloadAll();
@@ -236,7 +232,7 @@ private:
 
         m_CommandBuffers[m_FrameIndex].reset();
         recordCommandBuffer(imageIndex);
-        updateUniformBuffer(m_FrameIndex);
+        updateShaderData(m_FrameIndex);
 
         vk::PipelineStageFlags waitDestinationStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
         const vk::SubmitInfo submitInfo = {
@@ -277,20 +273,20 @@ private:
         startTime = currentTime;
     }
 
-    void updateUniformBuffer(uint32_t currentImage) {
+    void updateShaderData(uint32_t currentImage) {
         static auto startTime = std::chrono::high_resolution_clock::now();
 
         auto currentTime = std::chrono::high_resolution_clock::now();
         float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
-        UniformBufferObject ubo {};
+        ShaderData shaderData {};
         glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.5f, -2.0f));
         model = glm::rotate(model, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-        ubo.model = glm::rotate(model, time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        ubo.view = m_Camera.getViewMatrix();
-        ubo.proj = m_Camera.getProjectionMatrix();
-        ubo.proj[1][1] *= -1; // Vulkan's Y coordinate is inverted compared to OpenGL's, which glm was designed for originally
-        memcpy(m_UniformBuffers[currentImage].mappedMemory, &ubo, sizeof(ubo));
+        shaderData.model = glm::rotate(model, time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        shaderData.view = m_Camera.getViewMatrix();
+        shaderData.projection = m_Camera.getProjectionMatrix();
+        shaderData.projection[1][1] *= -1; // Vulkan's Y coordinate is inverted compared to OpenGL's, which glm was designed for originally
+        memcpy(m_ShaderDataBuffers[currentImage].mappedMemory, &shaderData, sizeof(shaderData));
     }
 
     void createInstance() {
@@ -403,10 +399,7 @@ private:
     static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
         vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
         vk::DebugUtilsMessageTypeFlagsEXT type,
-        const vk::DebugUtilsMessengerCallbackDataEXT * pCallbackData, void *
-
-
-
+        const vk::DebugUtilsMessengerCallbackDataEXT * pCallbackData, void * pUserData
     ) {
         std::cerr << "validation layer: type " << to_string(type) << " msg: " << pCallbackData->pMessage << std::endl;
 
@@ -459,11 +452,17 @@ private:
 
         auto features = physicalDevice.getFeatures2<vk::PhysicalDeviceFeatures2,
                                                     vk::PhysicalDeviceVulkan11Features,
+                                                    vk::PhysicalDeviceVulkan12Features,
                                                     vk::PhysicalDeviceVulkan13Features,
                                                     vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
         bool supportsRequiredFeatures =
             features.get<vk::PhysicalDeviceFeatures2>().features.samplerAnisotropy &&
             features.get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters &&
+            features.get<vk::PhysicalDeviceVulkan12Features>().shaderSampledImageArrayNonUniformIndexing &&
+            features.get<vk::PhysicalDeviceVulkan12Features>().descriptorBindingVariableDescriptorCount &&
+            features.get<vk::PhysicalDeviceVulkan12Features>().runtimeDescriptorArray &&
+            features.get<vk::PhysicalDeviceVulkan12Features>().bufferDeviceAddress &&
+            features.get<vk::PhysicalDeviceVulkan12Features>().descriptorIndexing &&
             features.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
             features.get<vk::PhysicalDeviceVulkan13Features>().synchronization2 &&
             features.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState;
@@ -471,7 +470,7 @@ private:
         return supportsVulkan1_3 && supportsGraphics && supportsAllRequiredExtensions && supportsRequiredFeatures;
     }
 
-    vk::SampleCountFlagBits getMaxUsableSampleCount() {
+    vk::SampleCountFlagBits getMaxUsableSampleCount() const {
         vk::PhysicalDeviceProperties physicalDeviceProperties = m_PhysicalDevice.getProperties();
 
         vk::SampleCountFlags counts = physicalDeviceProperties.limits.framebufferColorSampleCounts & physicalDeviceProperties.limits.framebufferDepthSampleCounts;
@@ -504,11 +503,19 @@ private:
         vk::StructureChain<
             vk::PhysicalDeviceFeatures2,
             vk::PhysicalDeviceVulkan11Features,
+            vk::PhysicalDeviceVulkan12Features,
             vk::PhysicalDeviceVulkan13Features,
             vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
         > featureChain = {
             { .features = { .samplerAnisotropy = true } },                   // vk::PhysicalDeviceFeatures2
             { .shaderDrawParameters = true },                                 // Enable shader draw parameters from Vulkan 1.1, necessary for shader objects (I think)
+            {
+                .descriptorIndexing = true,                                     // Enable descriptor indexing for "bindless" uniforms
+                .shaderSampledImageArrayNonUniformIndexing = true,
+                .descriptorBindingVariableDescriptorCount = true,
+                .runtimeDescriptorArray = true,
+                .bufferDeviceAddress = true                                     // Enable accessing buffers via pointers instead of needing descriptors
+            },
             { .synchronization2 = true, .dynamicRendering = true },           // Enable dynamic rendering from Vulkan 1.3
             { .extendedDynamicState = true },                                 // Enable extended dynamic state from the extension
         };
@@ -629,13 +636,29 @@ private:
         return { m_Device, viewInfo };
     }
 
+    // We are only using this for textures
     void createDescriptorSetLayout() {
         std::array bindings = {
-            vk::DescriptorSetLayoutBinding(0, vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eVertex, nullptr),
-            vk::DescriptorSetLayoutBinding(1, vk::DescriptorType::eCombinedImageSampler, 1, vk::ShaderStageFlagBits::eFragment, nullptr)
+            vk::DescriptorSetLayoutBinding(
+                0,
+                vk::DescriptorType::eCombinedImageSampler,
+                m_ResourceManager.getResourceTypeCount<Texture>(),
+                vk::ShaderStageFlagBits::eFragment,
+                nullptr
+            )
+        };
+
+        vk::DescriptorBindingFlags descriptorBindingFlags = {
+            vk::DescriptorBindingFlagBits::eVariableDescriptorCount
+        };
+
+        vk::DescriptorSetLayoutBindingFlagsCreateInfo bindingFlagsInfo = {
+            .bindingCount = 1,
+            .pBindingFlags = &descriptorBindingFlags,
         };
 
         vk::DescriptorSetLayoutCreateInfo layoutInfo = {
+            .pNext = &bindingFlagsInfo,
             .bindingCount = static_cast<uint32_t>(bindings.size()),
             .pBindings = bindings.data()
         };
@@ -714,14 +737,20 @@ private:
             .pAttachments = &colorBlendAttachment
         };
 
+        vk::PushConstantRange pushConstantRange = {
+            .stageFlags = vk::ShaderStageFlagBits::eVertex,
+            .size = sizeof(vk::DeviceAddress)
+        };
+
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo {
             .setLayoutCount = 1,
             .pSetLayouts = &*m_DescriptorSetLayout,
-            .pushConstantRangeCount = 0
+            .pushConstantRangeCount = 1,
+            .pPushConstantRanges = &pushConstantRange
         };
         m_PipelineLayout = vk::raii::PipelineLayout(m_Device, pipelineLayoutInfo);
 
-        vk::Format depthFormat = findDepthFormat();
+        vk::Format depthFormat = m_VulkanResourceService->findDepthFormat();
         vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo {
             .colorAttachmentCount = 1,
             .pColorAttachmentFormats = &m_SwapChainSurfaceFormat.format,
@@ -777,35 +806,13 @@ private:
     }
 
     void createDepthResources() {
-        vk::Format depthFormat = findDepthFormat();
+        vk::Format depthFormat = m_VulkanResourceService->findDepthFormat();
         VulkanImageData depthResources = m_VulkanResourceService->createDepthResources(
             depthFormat, m_SwapChainExtent, m_MsaaSamples
         );
         m_DepthImage = depthResources.image;
         m_DepthImageMemory = depthResources.imageMemory;
         m_DepthImageView = depthResources.imageView;
-    }
-
-    vk::Format findDepthFormat() {
-        return findSupportedFormat(
-            { vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint },
-            vk::ImageTiling::eOptimal,
-            vk::FormatFeatureFlagBits::eDepthStencilAttachment
-        );
-    }
-
-    vk::Format findSupportedFormat(const std::vector<vk::Format> & candidates, vk::ImageTiling tiling, vk::FormatFeatureFlags features) {
-        for (const auto format : candidates) {
-            vk::FormatProperties props = m_PhysicalDevice.getFormatProperties(format);
-            if (tiling == vk::ImageTiling::eLinear && (props.linearTilingFeatures & features) == features) {
-                return format;
-            }
-            if (tiling == vk::ImageTiling::eOptimal && (props.optimalTilingFeatures & features) == features) {
-                return format;
-            }
-        }
-
-        throw std::runtime_error("Failed to find supported format!");
     }
 
     // TODO remove? (unused)
@@ -845,20 +852,25 @@ private:
         m_GraphicsQueue.waitIdle();
     }
 
-    void createUniformBuffers() {
-        m_UniformBuffers = m_VulkanResourceService->createUniformBuffers(
-            sizeof(UniformBufferObject), MAX_FRAMES_IN_FLIGHT
+    void createShaderBuffers() {
+        m_ShaderDataBuffers = m_VulkanResourceService->createShaderBuffers(
+            sizeof(ShaderData), MAX_FRAMES_IN_FLIGHT
         );
     }
 
     void createDescriptorPool() {
+        // One texture = one descriptor to allocate
+        // Size is important because trying to allocate descriptors beyond the requested count will fail
         std::array poolSize = {
-            vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT),
-            vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, MAX_FRAMES_IN_FLIGHT)
+            vk::DescriptorPoolSize(
+                vk::DescriptorType::eCombinedImageSampler,
+                m_ResourceManager.getResourceTypeCount<Texture>()
+            ),
         };
+        // Only using descriptors for textures = no need to allocate one set per max frames in flight
         vk::DescriptorPoolCreateInfo poolInfo = {
             .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
-            .maxSets = MAX_FRAMES_IN_FLIGHT,
+            .maxSets = 1,
             .poolSizeCount = static_cast<uint32_t>(poolSize.size()),
             .pPoolSizes = poolSize.data()
         };
@@ -866,52 +878,37 @@ private:
     }
 
     void createDescriptorSets() {
-        std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, *m_DescriptorSetLayout);
-        vk::DescriptorSetAllocateInfo allocInfo {
-            .descriptorPool = m_DescriptorPool,
-            .descriptorSetCount = static_cast<uint32_t>(layouts.size()),
-            .pSetLayouts = layouts.data()
+        uint32_t variableDescCount = m_ResourceManager.getResourceTypeCount<Texture>();
+        vk::DescriptorSetVariableDescriptorCountAllocateInfo variableDescCountAllocInfo = {
+            .descriptorSetCount = 1,
+            .pDescriptorCounts = &variableDescCount
         };
-        m_DescriptorSets.clear();
-        m_DescriptorSets = m_Device.allocateDescriptorSets(allocInfo);
+        vk::DescriptorSetAllocateInfo textureDescriptorSetAllocInfo = {
+            .pNext = &variableDescCountAllocInfo,
+            .descriptorPool = m_DescriptorPool,
+            .descriptorSetCount = 1,
+            .pSetLayouts = &*m_DescriptorSetLayout
+        };
+        m_TextureDescriptorSet.clear();
+        m_TextureDescriptorSet = std::move(m_Device.allocateDescriptorSets(textureDescriptorSetAllocInfo).front());
 
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-            vk::DescriptorBufferInfo bufferInfo = {
-                .buffer = m_UniformBuffers[i].buffer,
-                .offset = 0,
-                .range = sizeof(UniformBufferObject), // can also use vk::WholeSize since we're overwriting the whole buffer
-            };
+        // For more than one texture, existing textures need to be collected into an array and written from there
+        auto textureImage = m_ResourceManager.getResource<Texture>(TEXTURE_NAME);
+        vk::DescriptorImageInfo imageInfo = {
+            .sampler = textureImage->getSampler(),
+            .imageView = textureImage->getImageView(),
+            .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
+        };
 
-            auto textureImage = m_ResourceManager.getResource<Texture>(TEXTURE_NAME);
+        vk::WriteDescriptorSet writeDescriptorSet = {
+            .dstSet = m_TextureDescriptorSet,
+            .dstBinding = 0,
+            .descriptorCount = 1,
+            .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+            .pImageInfo = &imageInfo
+        };
 
-            vk::DescriptorImageInfo imageInfo = {
-                .sampler = textureImage->getSampler(),
-                .imageView = textureImage->getImageView(),
-                .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
-            };
-
-            // Note: eCombinedImageSampler is not necessarily the most optimal type to use,
-            // but sometimes it is, and also it's the most straightforward to set up
-            std::array descriptorWrites {
-                vk::WriteDescriptorSet {
-                    .dstSet = m_DescriptorSets[i],
-                    .dstBinding = 0,
-                    .dstArrayElement = 0,
-                    .descriptorCount = 1,
-                    .descriptorType = vk::DescriptorType::eUniformBuffer,
-                    .pBufferInfo = &bufferInfo
-                },
-                vk::WriteDescriptorSet {
-                    .dstSet = m_DescriptorSets[i],
-                    .dstBinding = 1,
-                    .dstArrayElement = 0,
-                    .descriptorCount = 1,
-                    .descriptorType = vk::DescriptorType::eCombinedImageSampler,
-                    .pImageInfo = &imageInfo
-                }
-            };
-            m_Device.updateDescriptorSets(descriptorWrites, {});
-        }
+        m_Device.updateDescriptorSets(writeDescriptorSet, {});
     }
 
     void createCommandBuffers() {
@@ -990,6 +987,15 @@ private:
         commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *m_GraphicsPipeline);
         commandBuffer.bindVertexBuffers(0, vikingRoomMesh->getVertexBuffer(), { 0 });
         commandBuffer.bindIndexBuffer(vikingRoomMesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
+        // Upload ShaderData object to vertex
+        commandBuffer.pushConstants(
+            m_PipelineLayout,
+            vk::ShaderStageFlagBits::eVertex,
+            0,
+            sizeof(vk::DeviceAddress),
+            &m_ShaderDataBuffers[m_FrameIndex].bufferDeviceAddress
+        );
+
         commandBuffer.setViewport(
             0, vk::Viewport(
                 0.0f, 0.0f,
@@ -998,7 +1004,7 @@ private:
             )
         );
         commandBuffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), m_SwapChainExtent));
-        commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_PipelineLayout, 0, *m_DescriptorSets[m_FrameIndex], nullptr);
+        commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_PipelineLayout, 0, *m_TextureDescriptorSet, nullptr);
         commandBuffer.drawIndexed(vikingRoomMesh->getIndexCount(), 1, 0, 0, 0);
 
         commandBuffer.endRendering();
@@ -1125,10 +1131,9 @@ private:
     // here because it would be slightly overkill for drawing just a couple simple shapes.
     // We'll optimize this once there's an actual need/reason to do so.
 
-    std::vector<VulkanUniformBufferData> m_UniformBuffers {};
-
+    std::vector<VulkanShaderBufferData> m_ShaderDataBuffers {};
     vk::raii::DescriptorPool m_DescriptorPool = nullptr;
-    std::vector<vk::raii::DescriptorSet> m_DescriptorSets;
+    vk::raii::DescriptorSet m_TextureDescriptorSet = nullptr;
 
     vk::Image m_DepthImage = nullptr;
     vk::DeviceMemory m_DepthImageMemory = nullptr;

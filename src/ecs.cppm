@@ -34,7 +34,7 @@ export class Component {
 public:
     virtual ~Component() {
         if (m_State != State::Destroyed) {
-            onDestroy();
+            Component::onDestroy();
             m_State = State::Destroyed;
         }
     }

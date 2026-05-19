@@ -8,7 +8,7 @@ import camera;
 import ecs;
 import render_types;
 
-class CullingSystem {
+export class CullingSystem {
 public:
     explicit CullingSystem(Camera * camera) : m_Camera(camera) {}
 
@@ -40,7 +40,7 @@ public:
             boundingBox.transform(transformComponent->getTransformMatrix());
 
             if (frustum.intersects(boundingBox)) {
-                m_VisibleEntities.push_back(entity);
+                m_VisibleEntities.emplace_back(entity);
             }
         }
     }

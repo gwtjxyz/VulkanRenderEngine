@@ -28,10 +28,11 @@ export struct VulkanBufferData {
     vk::DeviceMemory bufferMemory = nullptr;
 };
 
-export struct VulkanUniformBufferData {
+export struct VulkanShaderBufferData {
     vk::Buffer buffer = nullptr;
     vk::DeviceMemory bufferMemory = nullptr;
     void * mappedMemory = nullptr;
+    vk::DeviceAddress bufferDeviceAddress = 0;          // offset this to access/modify data in the shader
 };
 
 // "Backbone" of the renderer, holds functions related to memory/resource allocation
@@ -92,30 +93,36 @@ public:
         return bufferData;
     }
 
-    std::vector<VulkanUniformBufferData> createUniformBuffers(vk::DeviceSize bufferSize, int maxFramesInFlight) {
-        std::vector<VulkanUniformBufferData> uniformBufferData {};
+    std::vector<VulkanShaderBufferData> createShaderBuffers(vk::DeviceSize bufferSize, int maxFramesInFlight) {
+        std::vector<VulkanShaderBufferData> shaderBufferData {};
 
         for (size_t i = 0; i < maxFramesInFlight; ++i) {
             vk::Buffer buffer;
             vk::DeviceMemory bufferMemory;
             createBuffer(
                 bufferSize,
-                vk::BufferUsageFlagBits::eUniformBuffer,
+                vk::BufferUsageFlagBits::eShaderDeviceAddress,
                 vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
                 buffer,
                 bufferMemory
             );
 
-            uniformBufferData.emplace_back(
-                VulkanUniformBufferData {
+            vk::BufferDeviceAddressInfo deviceAddressInfo = {
+                .buffer = buffer
+            };
+            vk::DeviceAddress bufferDeviceAddress = m_Device.getBufferAddress(deviceAddressInfo);
+
+            shaderBufferData.emplace_back(
+                VulkanShaderBufferData {
                     buffer,
                     bufferMemory,
-                    m_Device.mapMemory(bufferMemory, 0, bufferSize)
+                    m_Device.mapMemory(bufferMemory, 0, bufferSize),
+                    bufferDeviceAddress
                 }
             );
         }
 
-        return uniformBufferData;
+        return shaderBufferData;
     }
 
     VulkanImageData createGenericResources(
@@ -173,6 +180,31 @@ public:
             vk::MemoryPropertyFlagBits::eDeviceLocal,
             1,
             vk::ImageAspectFlagBits::eDepth
+        );
+    }
+
+    void freeResources(vk::Image & image, vk::DeviceMemory & deviceMemory, vk::ImageView & imageView, vk::Sampler & sampler) const {
+        m_Device.destroySampler(sampler);
+        sampler = nullptr;
+
+        freeResources(image, deviceMemory, imageView);
+    }
+
+    void freeResources(vk::Image & image, vk::DeviceMemory & deviceMemory, vk::ImageView & imageView) const {
+        m_Device.destroyImageView(imageView);
+        m_Device.destroyImage(image);
+        m_Device.freeMemory(deviceMemory);
+
+        image = nullptr;
+        deviceMemory = nullptr;
+        imageView = nullptr;
+    }
+
+    vk::Format findDepthFormat() {
+        return findSupportedFormat(
+            { vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint },
+            vk::ImageTiling::eOptimal,
+            vk::FormatFeatureFlagBits::eDepthStencilAttachment
         );
     }
 
@@ -437,6 +469,14 @@ private:
             .allocationSize = memRequirements.size,
             .memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties)
         };
+
+        if (usage & vk::BufferUsageFlagBits::eShaderDeviceAddress) {
+            vk::MemoryAllocateFlagsInfo allocFlagsInfo = {
+                .flags = vk::MemoryAllocateFlagBits::eDeviceAddress
+            };
+            allocInfo.pNext = &allocFlagsInfo;
+        }
+
         bufferMemory = m_Device.allocateMemory(allocInfo);
         m_Device.bindBufferMemory(buffer, bufferMemory, 0);
     }
@@ -599,6 +639,19 @@ private:
         return m_Device.createSampler(samplerInfo);
     }
 
+    vk::Format findSupportedFormat(const std::vector<vk::Format> & candidates, vk::ImageTiling tiling, vk::FormatFeatureFlags features) {
+        for (const auto format : candidates) {
+            vk::FormatProperties props = m_PhysicalDevice.getFormatProperties(format);
+            if (tiling == vk::ImageTiling::eLinear && (props.linearTilingFeatures & features) == features) {
+                return format;
+            }
+            if (tiling == vk::ImageTiling::eOptimal && (props.optimalTilingFeatures & features) == features) {
+                return format;
+            }
+        }
+
+        throw std::runtime_error("Failed to find supported format!");
+    }
 private:
     // Storing hpp-wrapped Vulkan handles instead of RAII objects so that we can work with them through here
     // but still clean them up from elsewhere and not worry about deinitialization order

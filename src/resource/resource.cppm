@@ -116,6 +116,12 @@ public:
         return resourceIt != typeResources.end();
     }
 
+    template<typename T>
+    [[nodiscrd]] uint32_t getResourceTypeCount() {
+        auto & typeResources = m_Resources[std::type_index(typeid(T))];
+        return typeResources.size();
+    }
+
     void release(const std::string & resourceId) {
         // Locate reference count entry for this resource
         auto it = m_RefCounts.find(resourceId);
@@ -238,12 +244,7 @@ protected:
     void doUnload() override {
         // Only perform cleanup if resource is currently loaded
         if (isLoaded()) {
-            const vk::Device device = Locator::getVulkanResourceService()->getDevice();
-
-            device.destroySampler(m_Sampler);
-            device.destroyImageView(m_ImageView);
-            device.destroyImage(m_Image);
-            device.freeMemory(m_DeviceMemory);
+            Locator::getVulkanResourceService()->freeResources(m_Image, m_DeviceMemory, m_ImageView, m_Sampler);
         }
     }
 private:
@@ -367,7 +368,11 @@ private:
                     attrib.texcoords[2 * index.texcoord_index + 0],
                     1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
                 };
-                vertex.color = {1.0f, 1.0f, 1.0f};
+                vertex.normal = {
+                    attrib.normals[3 * index.normal_index],
+                    attrib.normals[3 * index.normal_index + 1],
+                    attrib.normals[3 * index.normal_index + 2]
+                };
 
                 if (!uniqueVertices.contains(vertex)) {
                     uniqueVertices[vertex] = static_cast<uint32_t>(vertices.size());
