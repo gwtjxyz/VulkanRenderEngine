@@ -9,6 +9,10 @@ module;
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_impl_vulkan.h>
+
 export module render_engine;
 
 import std.compat;
@@ -20,6 +24,8 @@ import render_service_locator;
 import render_types;
 import resource;
 import platform;
+
+import glm;
 
 #if !(defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES) || defined(DISABLE_VULKAN_MODULE))
 import vulkan;
@@ -38,11 +44,8 @@ public:
 DispatchLoaderHack dispatchLoaderHack;
 #endif
 
-import glm;
-import tinyobjloader;
-
-constexpr uint32_t WIDTH = 800;
-constexpr uint32_t HEIGHT = 600;
+constexpr uint32_t WIDTH = 1600;
+constexpr uint32_t HEIGHT = 900;
 const std::string MODEL_NAME = "viking_room";
 const std::string TEXTURE_NAME = "viking_room";
 
@@ -57,6 +60,16 @@ constexpr bool enableValidationLayers = true;
 #endif // NDEBUG
 
 constexpr int MAX_FRAMES_IN_FLIGHT = 2;
+
+static void checkVkResult(VkResult err) {
+    if (err == 0)
+        return;
+    std::cerr << "[vulkan] Error: VkResult = " << err << std::endl;
+    __debugbreak();
+    // TODO: don't know if we really want to crash on any Vulkan error inside ImGui
+    if (err < 0)
+        abort();
+}
 
 // Upper layer of the renderer, performs rendering and interfaces with the resource manager
 export class RenderEngine {
@@ -84,6 +97,8 @@ private:
         glfwSetWindowUserPointer(m_Window, this);
         glfwSetFramebufferSizeCallback(m_Window, framebufferResizeCallback);
         glfwSetKeyCallback(m_Window, keyCallback);
+        glfwSetMouseButtonCallback(m_Window, mouseButtonCallback);
+        glfwSetWindowFocusCallback(m_Window, windowFocusCallback);
         glfwSetCursorPosCallback(m_Window, mouseCallback);
         glfwSetScrollCallback(m_Window, scrollCallback);
 
@@ -102,11 +117,34 @@ private:
         }
     }
 
+    static void mouseButtonCallback(GLFWwindow * window, int button, int action, int mods) {
+        ImGuiIO & io = ImGui::GetIO();
+        if (io.WantCaptureMouse == false && button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
+            auto app = static_cast<RenderEngine *>(glfwGetWindowUserPointer(window));
+            app->m_ShouldCursorBeVisible = false;
+        }
+    }
+
+    static void windowFocusCallback(GLFWwindow * window, int focused) {
+        auto app = static_cast<RenderEngine *>(glfwGetWindowUserPointer(window));
+
+        if (focused) {
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
+            app->m_IsWindowFocused = true;
+        } else {
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            app->m_IsWindowFocused = false;
+        }
+    }
+
     static void mouseCallback(GLFWwindow * window, double xPos, double yPos) {
         static bool firstMouse = true;
         static float lastX = 0.0f, lastY = 0.0f;
 
-        if (firstMouse) {
+        auto app = static_cast<RenderEngine *>(glfwGetWindowUserPointer(window));
+
+        // Still not quite right - camera jumps like crazy after regaining focus
+        if (firstMouse || !app->m_IsWindowFocused) {
             lastX = static_cast<float>(xPos);
             lastY = static_cast<float>(yPos);
             firstMouse = false;
@@ -118,11 +156,24 @@ private:
         lastX = static_cast<float>(xPos);
         lastY = static_cast<float>(yPos);
 
-        auto app = static_cast<RenderEngine *>(glfwGetWindowUserPointer(window));
+
+        // Still want to update lastX and lastY so we don't get a massive jump when we stop hovering over
+        // an imgui window, but don't want to route it to our camera controls
+        if (RenderEngine::isImguiCapturingMouse() || app->m_ShouldCursorBeVisible) {
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            return;
+        }
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
         app->m_Camera.processMouseMovement(xOffset, yOffset);
     }
 
     static void scrollCallback(GLFWwindow * window, double xOffset, double yOffset) {
+        ImGuiIO & io = ImGui::GetIO();
+        if (io.WantCaptureMouse) {
+            return;
+        }
+
         auto app = static_cast<RenderEngine *>(glfwGetWindowUserPointer(window));
         app->m_Camera.processMouseScroll(static_cast<float>(yOffset));
     }
@@ -134,6 +185,7 @@ private:
         pickPhysicalDevice();
         createLogicalDevice();
         createSwapChain();
+        setupImgui();
         createImageViews();
         createCommandPool();
         loadTexture();
@@ -165,8 +217,23 @@ private:
         m_Device.waitIdle();
     }
 
+    static bool isImguiCapturingKeyboard() {
+        const ImGuiIO & io = ImGui::GetIO();
+
+        return io.WantCaptureKeyboard;
+    }
+
+    static bool isImguiCapturingMouse() {
+        const ImGuiIO & io = ImGui::GetIO();
+
+        return io.WantCaptureMouse;
+    }
+
     // For continuously inputting keys; for them only being pressed once, we keep the callback
     void processInput(GLFWwindow * window, Camera & camera, const float deltaTime) {
+        if (isImguiCapturingKeyboard())
+            return;
+
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
             camera.processKeyboard(CameraMovement::FORWARD, deltaTime);
         if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
@@ -183,6 +250,14 @@ private:
 
         if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
             glfwSetWindowShouldClose(window, true);
+
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS && m_CanUiFocusBeToggled) {
+            m_ShouldCursorBeVisible = !m_ShouldCursorBeVisible;
+            m_CanUiFocusBeToggled = false;
+        }
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_RELEASE && !m_CanUiFocusBeToggled) {
+            m_CanUiFocusBeToggled = true;
+        }
     }
 
     void cleanup() {
@@ -202,11 +277,21 @@ private:
 
         m_ResourceManager.unloadAll();
 
+        ImGui_ImplVulkan_Shutdown();
+        ImGui_ImplGlfw_Shutdown();
+        ImGui::DestroyContext();
+
         glfwDestroyWindow(m_Window);
         glfwTerminate();
     }
 
     void drawFrame() {
+        // Start the ImGui frame
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        ImGui::ShowDemoWindow(); // Show demo window! :D
+
         // Note: m_InFlightFences, m_PresentCompleteSemaphores and m_CommandBuffers are indexed by frameIndex,
         // while m_RenderFinishedSemaphores is indexed by imageIndex
 
@@ -261,6 +346,7 @@ private:
             // There are no other success codes other than eSuccess; on any error code, presentKHR already threw an exception.
             assert(result == vk::Result::eSuccess);
         }
+
         m_FrameIndex = (m_FrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
@@ -406,6 +492,55 @@ private:
         return vk::False;
     }
 
+    void setupImgui() {
+        // Setup Dear ImGui context
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGuiIO & io = ImGui::GetIO();
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+
+        // Setup Platform/Renderer backends
+        ImGui_ImplGlfw_InitForVulkan(m_Window, true);
+
+        auto vkSurfaceFormat = static_cast<VkFormat>(m_SwapChainSurfaceFormat.format);
+        auto vkDepthFormat = static_cast<VkFormat>(m_VulkanResourceService->findDepthFormat());
+
+        ImGui_ImplVulkan_InitInfo initInfo = {
+            .ApiVersion = vk::ApiVersion14,
+            .Instance = *m_Instance,
+            .PhysicalDevice = *m_PhysicalDevice,
+            .Device = *m_Device,
+            .QueueFamily = m_QueueIndex,
+            .Queue = *m_GraphicsQueue,
+            .DescriptorPoolSize = 8,
+            .MinImageCount = 2,
+            .ImageCount = 2,
+            .PipelineInfoMain = {
+                .MSAASamples = static_cast<VkSampleCountFlagBits>(m_MsaaSamples),
+                .PipelineRenderingCreateInfo = {
+                    .sType = static_cast<VkStructureType>(vk::StructureType::ePipelineRenderingCreateInfoKHR),
+                    .colorAttachmentCount = 1,
+                    .pColorAttachmentFormats = &vkSurfaceFormat,
+                    .depthAttachmentFormat = vkDepthFormat
+                },
+            },
+            .UseDynamicRendering = true,
+            .CheckVkResultFn = checkVkResult
+        };
+
+        // Need to load Vulkan functions before calling init
+        const vk::Instance * instancePtr = &*m_Instance;
+        ImGui_ImplVulkan_LoadFunctions(vk::ApiVersion14, loadVulkanFunctionsForImgui, const_cast<vk::Instance *>(instancePtr));
+
+        ImGui_ImplVulkan_Init(&initInfo);
+    }
+
+    static vk::PFN_VoidFunction loadVulkanFunctionsForImgui(const char * functionName, void * userData) {
+        auto * instance = static_cast<vk::Instance *>(userData);
+        return instance->getProcAddr(functionName);
+    }
+
     void createSurface() {
         VkSurfaceKHR surface;
         if (glfwCreateWindowSurface(*m_Instance, m_Window, nullptr, &surface) != VkResult::VK_SUCCESS) {
@@ -429,6 +564,8 @@ private:
         }
         m_PhysicalDevice = *devIter;
         m_VulkanResourceService->setPhysicalDevice(m_PhysicalDevice);
+        // TODO: ImGui doesn't like multisampling being set here for some reason, find out why
+        // m_MsaaSamples = vk::SampleCountFlagBits::e1;
         m_MsaaSamples = getMaxUsableSampleCount();
     }
 
@@ -950,19 +1087,33 @@ private:
         vk::ClearValue clearColor = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f);
         vk::ClearValue clearDepth = vk::ClearDepthStencilValue(1.0f, 0);
 
-        // Multisampled color attachment with resolve attachment
-        // According to spec, if resolveMode is not RESOLVE_MODE_NONE, and resolveImageView is not null,
-        // a render pass multisample resolve operation is defined for the attachment subresource.
-        vk::RenderingAttachmentInfo colorAttachmentInfo = {
-            .imageView = m_ColorImageView,
-            .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-            .resolveMode = vk::ResolveModeFlagBits::eAverage,
-            .resolveImageView = m_SwapChainImageViews[imageIndex],
-            .resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-            .loadOp = vk::AttachmentLoadOp::eClear,
-            .storeOp = vk::AttachmentStoreOp::eStore,
-            .clearValue = clearColor
-        };
+        vk::RenderingAttachmentInfo colorAttachmentInfo {};
+
+        if (m_MsaaSamples == vk::SampleCountFlagBits::e1) {
+            colorAttachmentInfo = {
+                .imageView = m_SwapChainImageViews[imageIndex],
+                .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+                .resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+                .loadOp = vk::AttachmentLoadOp::eClear,
+                .storeOp = vk::AttachmentStoreOp::eStore,
+                .clearValue = clearColor
+            };
+        } else {
+            // Multisampled color attachment with resolve attachment
+            // According to spec, if resolveMode is not RESOLVE_MODE_NONE, and resolveImageView is not null,
+            // a render pass multisample resolve operation is defined for the attachment subresource.
+            colorAttachmentInfo = {
+                .imageView = m_ColorImageView,
+                .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+                .resolveMode = vk::ResolveModeFlagBits::eAverage,
+                .resolveImageView = m_SwapChainImageViews[imageIndex],
+                .resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+                .loadOp = vk::AttachmentLoadOp::eClear,
+                .storeOp = vk::AttachmentStoreOp::eStore,
+                .clearValue = clearColor
+            };
+        }
+
         vk::RenderingAttachmentInfo depthAttachmentInfo = {
             .imageView = m_DepthImageView,
             .imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
@@ -1006,6 +1157,10 @@ private:
         commandBuffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), m_SwapChainExtent));
         commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_PipelineLayout, 0, *m_TextureDescriptorSet, nullptr);
         commandBuffer.drawIndexed(vikingRoomMesh->getIndexCount(), 1, 0, 0, 0);
+
+        // Draw ImGui
+        ImGui::Render();
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), *m_CommandBuffers[m_FrameIndex]);
 
         commandBuffer.endRendering();
 
@@ -1095,6 +1250,10 @@ private:
     Camera m_Camera {};
 
     float m_DeltaTime = 0.0f;
+
+    bool m_IsWindowFocused = true;
+    bool m_ShouldCursorBeVisible = false;
+    bool m_CanUiFocusBeToggled = false;     // Seems janky, should probably move to a more robust input state handling method later
 
     vk::raii::Context m_Context;
     vk::raii::Instance m_Instance = nullptr;

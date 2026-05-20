@@ -134,11 +134,27 @@ if(ENABLE_CPP20_MODULE)
     target_link_libraries(tinyobjloader-module PUBLIC tinyobjloader::tinyobjloader)
 endif()
 
-add_executable(VulkanRenderEngine src/main.cpp)
+# ImGui
+add_library(ImGui)
+set(IMGUI_DIR external/imgui)
+set(IMGUI_SOURCES
+        # ImGui sources
+        ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_widgets.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_demo.cpp
+        # GLFW and Vulkan backends
+        ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
+        # std::string support
+        ${IMGUI_DIR}/misc/cpp/imgui_stdlib.cpp
+)
+target_compile_definitions(ImGui PUBLIC IMGUI_IMPL_VULKAN_NO_PROTOTYPES)
+target_sources(ImGui PUBLIC ${IMGUI_SOURCES})
+target_include_directories(ImGui PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backends ${IMGUI_DIR}/misc/cpp)
+target_link_libraries(ImGui PRIVATE glfw Vulkan::Headers)
+
+add_executable(VulkanRenderEngine src/main.cpp ${IMGUI_SOURCES})
 # Compile modules
 target_sources(VulkanRenderEngine PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
-        src/core/platform.cppm
+        src/core/platform.cppm src/core/input.cppm
         src/ecs.cppm
         src/resource/resource.cppm
         src/render/vulkan_resource_service.cppm src/render/render_engine.cppm src/render/camera.cppm
@@ -147,7 +163,7 @@ target_sources(VulkanRenderEngine PUBLIC
 
 target_compile_definitions(VulkanRenderEngine PRIVATE USE_CPP20_MODULES=1)
 
-target_link_libraries(VulkanRenderEngine PRIVATE Vulkan-HppModule glfw glm-module stb::stb tinyobjloader-module KTX::ktx tinygltf::tinygltf)
+target_link_libraries(VulkanRenderEngine PRIVATE Vulkan-HppModule glfw glm-module stb::stb tinyobjloader-module KTX::ktx tinygltf::tinygltf ImGui)
 
 # TODO Should this be somewhere else?
 if(MSVC)
