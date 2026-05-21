@@ -12,6 +12,7 @@ struct ShaderData {
     float4x4 model[1];
     float4 lightPos;
     uint32_t selected;
+    uint32_t lightingEnabled;
 }
 
 struct VSOutput {
@@ -22,6 +23,7 @@ struct VSOutput {
     float3 lightVec;
     float3 viewVec;
     uint32_t instanceIndex;
+    uint32_t lightingEnabled;
 };
 
 [shader("vertex")]
@@ -40,25 +42,28 @@ VSOutput vertMain(VSInput input, uniform ShaderData * shaderData, uint instanceI
     output.viewVec = -fragPos.xyz;
 
     output.instanceIndex = instanceIndex;
+    output.lightingEnabled = shaderData.lightingEnabled;
 
     return output;
 }
 
 [shader("fragment")]
 float4 fragMain(VSOutput vertIn) : SV_TARGET {
-    float4 sampled = textures[NonUniformResourceIndex(vertIn.instanceIndex)].Sample(vertIn.UV);
-    return float4(sampled.rgb, 1.0);
+    if (vertIn.lightingEnabled == 1) {
+        // Phong lighting
+        float3 N = normalize(vertIn.normal);
+        float3 L = normalize(vertIn.lightVec);
+        float3 V = normalize(vertIn.viewVec);
+        float3 R = reflect(-L, N);
+        float3 diffuse = max(dot(N, L), 0.0025);
+        float3 specular = pow(max(dot(R, V), 0.0), 16.0) * 0.75;
 
-    // Phong lighting
-    float3 N = normalize(vertIn.normal);
-    float3 L = normalize(vertIn.lightVec);
-    float3 V = normalize(vertIn.viewVec);
-    float3 R = reflect(-L, N);
-    float3 diffuse = max(dot(N, L), 0.0025);
-    float3 specular = pow(max(dot(R, V), 0.0), 16.0) * 0.75;
+        // Sample from texture
+        float3 color = textures[NonUniformResourceIndex(vertIn.instanceIndex)].Sample(vertIn.UV).rgb * vertIn.factor;
 
-    // Sample from texture
-    float3 color = textures[NonUniformResourceIndex(vertIn.instanceIndex)].Sample(vertIn.UV).rgb * vertIn.factor;
-
-    return float4(diffuse * color.rgb + specular, 1.0);
+        return float4(diffuse * color.rgb + specular, 1.0);
+    } else {
+        float4 sampled = textures[NonUniformResourceIndex(vertIn.instanceIndex)].Sample(vertIn.UV);
+        return float4(sampled.rgb, 1.0);
+    }
 }

@@ -53,7 +53,8 @@ export struct ShaderData {
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 model;
     alignas(16) glm::vec4 lightPos { 0.0f, -10.0f, 10.0f, 0.0f };
-    alignas(16) uint32_t selected { 1 };
+    alignas(4) uint32_t selected { 1 };
+    alignas(4) uint32_t lightingEnabled = { 1 };
 };
 
 export struct Plane {

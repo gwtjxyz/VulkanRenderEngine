@@ -205,6 +205,7 @@ private:
         advanceDeltaTime();
 
         while (!glfwWindowShouldClose(m_Window)) {
+            auto timeAtFrameStart = std::chrono::high_resolution_clock::now();
             advanceDeltaTime();
             glfwPollEvents();
             processInput(m_Window, m_Camera, m_DeltaTime);
@@ -212,6 +213,9 @@ private:
                 recompileShadersAndRecreatePipeline();
             }
             drawFrame();
+            auto timeAtFrameEnd = std::chrono::high_resolution_clock::now();
+            auto frameTime = timeAtFrameEnd - timeAtFrameStart;
+            m_Fps = std::chrono::duration(std::chrono::seconds(1)) / frameTime;
         }
 
         m_Device.waitIdle();
@@ -290,7 +294,11 @@ private:
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        ImGui::ShowDemoWindow(); // Show demo window! :D
+        // Keeping this for reference
+        // ImGui::ShowDemoWindow(); // Show demo window! :D
+
+        // Draw our custom UI widget
+        drawUI();
 
         // Note: m_InFlightFences, m_PresentCompleteSemaphores and m_CommandBuffers are indexed by frameIndex,
         // while m_RenderFinishedSemaphores is indexed by imageIndex
@@ -350,6 +358,60 @@ private:
         m_FrameIndex = (m_FrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
+    // In the future we will extract it to somewhere else (possibly a separate class/system?),
+    // but for now, this isn't really required
+    void drawUI() {
+        // Initial window size
+        const ImGuiViewport * mainViewport = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(ImVec2(mainViewport->WorkPos.x + 20, mainViewport->WorkPos.y + 20), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(190, 90), ImGuiCond_FirstUseEver);
+
+        if (!ImGui::Begin("Engine Controls", nullptr, ImGuiWindowFlags_NoFocusOnAppearing)) {
+            // Early return if the window is collapsed
+            ImGui::End();
+            return;
+        }
+
+        const float labelWidthBase = ImGui::GetFontSize() * 12;
+        const float labelWidthMax = ImGui::GetContentRegionAvail().x * 0.4f;
+        float labelWidth;
+        if (labelWidthBase > labelWidthMax) {
+            labelWidth = labelWidthMax;
+        } else {
+            labelWidth = labelWidthBase;
+        }
+
+        ImGui::PushItemWidth(-labelWidth);
+        ImGui::Text("FPS: %lld", m_Fps);
+        ImGui::Spacing();
+        if (ImGui::CollapsingHeader("Shader Controls")) {
+            if (ImGui::BeginTable("ShaderControlCheckboxes", 2)) {
+                ImGui::TableNextColumn();
+                ImGui::Checkbox("Lighting enabled", &m_IsLightingEnabled);
+                ImGui::Checkbox("Model spin enabled", &m_IsModelSpinEnabled);
+                ImGui::EndTable();
+            }
+            ImGui::Spacing();
+            static float lightPosWidgetData[3] {
+                m_LightPosition.x, m_LightPosition.y, m_LightPosition.z
+            };
+            if (!m_IsLightingEnabled) {
+                ImGui::BeginDisabled();
+            }
+
+            ImGui::DragFloat3("Light position", lightPosWidgetData, 0.005f, -20.0f, 20.0f, "%.3f");
+            m_LightPosition.x = lightPosWidgetData[0];
+            m_LightPosition.y = lightPosWidgetData[1];
+            m_LightPosition.z = lightPosWidgetData[2];
+
+            if (!m_IsLightingEnabled) {
+                ImGui::EndDisabled();
+            }
+        }
+
+        ImGui::End();
+    }
+
     void advanceDeltaTime() {
         static auto startTime = std::chrono::high_resolution_clock::now();
 
@@ -366,13 +428,27 @@ private:
         float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
         ShaderData shaderData {};
-        glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.5f, -2.0f));
-        model = glm::rotate(model, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-        shaderData.model = glm::rotate(model, time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        static glm::mat4 model = glm::rotate(
+            glm::translate(
+                glm::mat4(1.0f),
+                glm::vec3(0.0f, -0.5f, -2.0f)
+            ),
+            glm::radians(-90.0f),
+            glm::vec3(1.0f, 0.0f, 0.0f)
+        );
+
+        if (m_IsModelSpinEnabled) {
+            model = glm::rotate(model, time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        }
+
+        shaderData.model = model;
         shaderData.view = m_Camera.getViewMatrix();
         shaderData.projection = m_Camera.getProjectionMatrix();
         shaderData.projection[1][1] *= -1; // Vulkan's Y coordinate is inverted compared to OpenGL's, which glm was designed for originally
+        shaderData.lightPos = m_LightPosition;
+        shaderData.lightingEnabled = m_IsLightingEnabled;
         memcpy(m_ShaderDataBuffers[currentImage].mappedMemory, &shaderData, sizeof(shaderData));
+        startTime = currentTime;
     }
 
     void createInstance() {
@@ -490,50 +566,6 @@ private:
         std::cerr << "validation layer: type " << to_string(type) << " msg: " << pCallbackData->pMessage << std::endl;
 
         return vk::False;
-    }
-
-    void setupImgui() {
-        // Setup Dear ImGui context
-        IMGUI_CHECKVERSION();
-        ImGui::CreateContext();
-        ImGuiIO & io = ImGui::GetIO();
-        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-        io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
-
-        // Setup Platform/Renderer backends
-        ImGui_ImplGlfw_InitForVulkan(m_Window, true);
-
-        auto vkSurfaceFormat = static_cast<VkFormat>(m_SwapChainSurfaceFormat.format);
-        auto vkDepthFormat = static_cast<VkFormat>(m_VulkanResourceService->findDepthFormat());
-
-        ImGui_ImplVulkan_InitInfo initInfo = {
-            .ApiVersion = vk::ApiVersion14,
-            .Instance = *m_Instance,
-            .PhysicalDevice = *m_PhysicalDevice,
-            .Device = *m_Device,
-            .QueueFamily = m_QueueIndex,
-            .Queue = *m_GraphicsQueue,
-            .DescriptorPoolSize = 8,
-            .MinImageCount = 2,
-            .ImageCount = 2,
-            .PipelineInfoMain = {
-                .MSAASamples = static_cast<VkSampleCountFlagBits>(m_MsaaSamples),
-                .PipelineRenderingCreateInfo = {
-                    .sType = static_cast<VkStructureType>(vk::StructureType::ePipelineRenderingCreateInfoKHR),
-                    .colorAttachmentCount = 1,
-                    .pColorAttachmentFormats = &vkSurfaceFormat,
-                    .depthAttachmentFormat = vkDepthFormat
-                },
-            },
-            .UseDynamicRendering = true,
-            .CheckVkResultFn = checkVkResult
-        };
-
-        // Need to load Vulkan functions before calling init
-        const vk::Instance * instancePtr = &*m_Instance;
-        ImGui_ImplVulkan_LoadFunctions(vk::ApiVersion14, loadVulkanFunctionsForImgui, const_cast<vk::Instance *>(instancePtr));
-
-        ImGui_ImplVulkan_Init(&initInfo);
     }
 
     static vk::PFN_VoidFunction loadVulkanFunctionsForImgui(const char * functionName, void * userData) {
@@ -752,6 +784,52 @@ private:
             minImageCount = surfaceCapabilities.maxImageCount;
         }
         return minImageCount;
+    }
+
+    void setupImgui() {
+        // Setup Dear ImGui context
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGuiIO & io = ImGui::GetIO();
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+
+        // Setup Platform/Renderer backends
+        ImGui_ImplGlfw_InitForVulkan(m_Window, true);
+
+        auto vkSurfaceFormat = static_cast<VkFormat>(m_SwapChainSurfaceFormat.format);
+        auto vkDepthFormat = static_cast<VkFormat>(m_VulkanResourceService->findDepthFormat());
+
+        ImGui::StyleColorsDark();
+
+        ImGui_ImplVulkan_InitInfo initInfo = {
+            .ApiVersion = vk::ApiVersion14,
+            .Instance = *m_Instance,
+            .PhysicalDevice = *m_PhysicalDevice,
+            .Device = *m_Device,
+            .QueueFamily = m_QueueIndex,
+            .Queue = *m_GraphicsQueue,
+            .DescriptorPoolSize = 8,
+            .MinImageCount = 2,
+            .ImageCount = 2,
+            .PipelineInfoMain = {
+                .MSAASamples = static_cast<VkSampleCountFlagBits>(m_MsaaSamples),
+                .PipelineRenderingCreateInfo = {
+                    .sType = static_cast<VkStructureType>(vk::StructureType::ePipelineRenderingCreateInfoKHR),
+                    .colorAttachmentCount = 1,
+                    .pColorAttachmentFormats = &vkSurfaceFormat,
+                    .depthAttachmentFormat = vkDepthFormat
+                },
+            },
+            .UseDynamicRendering = true,
+            .CheckVkResultFn = checkVkResult
+        };
+
+        // Need to load Vulkan functions before calling init
+        const vk::Instance * instancePtr = &*m_Instance;
+        ImGui_ImplVulkan_LoadFunctions(vk::ApiVersion14, loadVulkanFunctionsForImgui, const_cast<vk::Instance *>(instancePtr));
+
+        ImGui_ImplVulkan_Init(&initInfo);
     }
 
     void createImageViews() {
@@ -1250,10 +1328,16 @@ private:
     Camera m_Camera {};
 
     float m_DeltaTime = 0.0f;
+    uint64_t m_Fps = 0;
+
+    // Dynamic shader data
+    bool m_IsLightingEnabled = true;
+    glm::vec4 m_LightPosition = { 0.0f, -10.0f, 10.0f, 0.0f };
 
     bool m_IsWindowFocused = true;
     bool m_ShouldCursorBeVisible = false;
     bool m_CanUiFocusBeToggled = false;     // Seems janky, should probably move to a more robust input state handling method later
+    bool m_IsModelSpinEnabled = true;
 
     vk::raii::Context m_Context;
     vk::raii::Instance m_Instance = nullptr;
