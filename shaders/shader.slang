@@ -1,36 +1,67 @@
 struct VSInput {
     float3 inPosition; // implicitly location 0
-    float3 inColor;    // implicitly location 1
-    float2 inTexCoord; // implicitly location 2
+    float3 inNormal;    // implicitly location 1
+    float2 inUV; // implicitly location 2
 }
 
-struct UniformBuffer {
-    float4x4 model;
+Sampler2D textures[];
+
+struct ShaderData {
+    float4x4 projection;
     float4x4 view;
-    float4x4 proj;
+    float4x4 model[1];
+    float4 lightPos;
+    uint32_t lightingEnabled;
+    uint32_t textureIndex;
 }
-ConstantBuffer<UniformBuffer> ubo;
 
 struct VSOutput {
     float4 pos : SV_Position;
-    float3 fragColor;
-    float2 fragTexCoord;
+    float3 normal;
+    float2 UV;
+    float3 lightVec;
+    float3 viewVec;
+    uint32_t lightingEnabled;
+    uint32_t textureIndex;
 };
 
 [shader("vertex")]
-VSOutput vertMain(VSInput input) {
+VSOutput vertMain(VSInput input, uniform ShaderData * shaderData, uint instanceIndex : SV_VulkanInstanceID) {
     VSOutput output;
-    output.pos = mul(ubo.proj, mul(ubo.view, mul(ubo.model, float4(input.inPosition, 1.0))));
-    output.fragColor = input.inColor;
-    output.fragTexCoord = input.inTexCoord;
+    float4x4 modelMatrix = shaderData->model[instanceIndex];
+
+    output.pos = mul(shaderData->projection, mul(shaderData->view, mul(modelMatrix, float4(input.inPosition.xyz, 1.0))));
+    output.normal = mul((float3x3)mul(shaderData->view, modelMatrix), input.inNormal);
+    output.UV = input.inUV;
+
+    // Calculate view vectors required for lighting
+    float4 fragPos = mul(mul(shaderData->view, modelMatrix), float4(input.inPosition.xyz, 1.0));
+    output.lightVec = shaderData->lightPos.xyz - fragPos.xyz;
+    output.viewVec = -fragPos.xyz;
+
+    output.lightingEnabled = shaderData.lightingEnabled;
+    output.textureIndex = shaderData.textureIndex;
+
     return output;
 }
 
-Sampler2D texture;
-
 [shader("fragment")]
 float4 fragMain(VSOutput vertIn) : SV_TARGET {
-    float4 sampled = texture.Sample(vertIn.fragTexCoord);
-    return float4(sampled.rgb, 1.0);
-    // return float4(vertIn.fragColor * texture.Sample(vertIn.fragTexCoord).rgb, 1.0);
+    if (vertIn.lightingEnabled == 1) {
+        // Phong lighting
+        float3 N = normalize(vertIn.normal);
+        float3 L = normalize(vertIn.lightVec);
+        float3 V = normalize(vertIn.viewVec);
+        float3 R = reflect(-L, N);
+        float3 diffuse = max(dot(N, L), 0.0025);
+        float3 specular = pow(max(dot(R, V), 0.0), 16.0) * 0.75;
+
+        // Sample from texture
+        float3 color = textures[vertIn.textureIndex].Sample(vertIn.UV).rgb;
+
+        return float4(diffuse * color.rgb + specular, 1.0);
+    } else {
+        float4 sampled = textures[vertIn.textureIndex].Sample(vertIn.UV);
+        return float4(sampled.rgb, 1.0);
+    }
 }
