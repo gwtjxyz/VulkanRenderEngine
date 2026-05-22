@@ -2,9 +2,10 @@
 
 ## Current priority
 
-- imgui integration for tracking application state (variables, FPS, etc)
-- Splitting code into different application layers
-- Extracting code out of main.cpp and into separate modules
+- Better asset management
+- Different asset formats (KTX, GLTF, etc)
+- Architecture work
+- ECS integration
 
 ## Backlog
 
@@ -28,10 +29,12 @@
 
 ### Rendering
 - Implement culling
-- 
 
 ## Completed
 
 - Shader hot reloading
 - Movable camera
 - Basic asset loading
+- imgui integration for tracking application state (variables, FPS, etc)
+- Extracting code out of main.cpp and into separate modules
+- Bindless textures using descriptor indexing and buffer device address extensions

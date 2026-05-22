@@ -1,0 +1,10 @@
+Model credits:
+
+Terrain:
+Link: https://sketchfab.com/3d-models/free-quick-terrain-test-b0ad92e85bf242d9bf24009a40b4e4d2
+License: CC BY 4.0
+
+Viking room:
+Link: https://sketchfab.com/3d-models/viking-room-a49f1b8e4f5c4ecf9e1fe7d81915ad38
+License: CC BY 4.0
+Note: Originally downloaded from the Khronos Vulkan Tutorial: https://docs.vulkan.org/tutorial/latest/08_Loading_models.html

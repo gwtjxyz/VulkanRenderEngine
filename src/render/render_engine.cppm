@@ -46,8 +46,10 @@ DispatchLoaderHack dispatchLoaderHack;
 
 constexpr uint32_t WIDTH = 1600;
 constexpr uint32_t HEIGHT = 900;
-const std::string MODEL_NAME = "viking_room";
-const std::string TEXTURE_NAME = "viking_room";
+const std::string VIKING_ROOM_MODEL_NAME = "viking_room";
+const std::string VIKING_ROOM_TEXTURE_NAME = "viking_room";
+const std::string TERRAIN_MODEL_NAME = "terrain";
+const std::string TERRAIN_TEXTURE_NAME = "terrain_diffuse";
 
 const std::vector<char const *> validationLayers = {
     "VK_LAYER_KHRONOS_validation"
@@ -188,8 +190,8 @@ private:
         setupImgui();
         createImageViews();
         createCommandPool();
-        loadTexture();
-        loadModel();
+        loadTextures();
+        loadModels();
         createDescriptorSetLayout();
         createGraphicsPipeline();
         createColorResources();
@@ -294,8 +296,6 @@ private:
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        // Keeping this for reference
-        // ImGui::ShowDemoWindow(); // Show demo window! :D
 
         // Draw our custom UI widget
         drawUI();
@@ -324,8 +324,8 @@ private:
         m_Device.resetFences(*m_InFlightFences[m_FrameIndex]);
 
         m_CommandBuffers[m_FrameIndex].reset();
-        recordCommandBuffer(imageIndex);
         updateShaderData(m_FrameIndex);
+        recordCommandBuffer(imageIndex);
 
         vk::PipelineStageFlags waitDestinationStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
         const vk::SubmitInfo submitInfo = {
@@ -364,7 +364,7 @@ private:
         // Initial window size
         const ImGuiViewport * mainViewport = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(ImVec2(mainViewport->WorkPos.x + 20, mainViewport->WorkPos.y + 20), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(190, 90), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(400, 210), ImGuiCond_FirstUseEver);
 
         if (!ImGui::Begin("Engine Controls", nullptr, ImGuiWindowFlags_NoFocusOnAppearing)) {
             // Early return if the window is collapsed
@@ -383,6 +383,9 @@ private:
 
         ImGui::PushItemWidth(-labelWidth);
         ImGui::Text("FPS: %lld", m_Fps);
+        ImGui::Spacing();
+        ImGui::Text("Controls: WASD to move, Space/Control to move up/down");
+        ImGui::Text("Esc to show/hide mouse, Q to exit, R to reload shaders");
         ImGui::Spacing();
         if (ImGui::CollapsingHeader("Shader Controls")) {
             if (ImGui::BeginTable("ShaderControlCheckboxes", 2)) {
@@ -427,8 +430,8 @@ private:
         auto currentTime = std::chrono::high_resolution_clock::now();
         float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
-        ShaderData shaderData {};
-        static glm::mat4 model = glm::rotate(
+        ShaderData shaderData[2] {};
+        static glm::mat4 vikingRoomModel = glm::rotate(
             glm::translate(
                 glm::mat4(1.0f),
                 glm::vec3(0.0f, -0.5f, -2.0f)
@@ -438,15 +441,25 @@ private:
         );
 
         if (m_IsModelSpinEnabled) {
-            model = glm::rotate(model, time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+            vikingRoomModel = glm::rotate(vikingRoomModel, time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         }
 
-        shaderData.model = model;
-        shaderData.view = m_Camera.getViewMatrix();
-        shaderData.projection = m_Camera.getProjectionMatrix();
-        shaderData.projection[1][1] *= -1; // Vulkan's Y coordinate is inverted compared to OpenGL's, which glm was designed for originally
-        shaderData.lightPos = m_LightPosition;
-        shaderData.lightingEnabled = m_IsLightingEnabled;
+        shaderData[0].model = vikingRoomModel;
+        shaderData[0].view = m_Camera.getViewMatrix();
+        shaderData[0].projection = m_Camera.getProjectionMatrix();
+        shaderData[0].projection[1][1] *= -1; // Vulkan's Y coordinate is inverted compared to OpenGL's, which glm was designed for originally
+        shaderData[0].lightPos = m_LightPosition;
+        shaderData[0].lightingEnabled = m_IsLightingEnabled;
+        shaderData[0].textureIndex = 0;
+
+        shaderData[1].model = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-20.0f, -15.0f, 30.0f)), glm::vec3(0.2f, 0.2f, 0.2f));
+        shaderData[1].view = m_Camera.getViewMatrix();
+        shaderData[1].projection = m_Camera.getProjectionMatrix();
+        shaderData[1].projection[1][1] *= -1;
+        shaderData[1].lightPos = m_LightPosition;
+        shaderData[1].lightingEnabled = m_IsLightingEnabled;
+        shaderData[1].textureIndex = 1;
+
         memcpy(m_ShaderDataBuffers[currentImage].mappedMemory, &shaderData, sizeof(shaderData));
         startTime = currentTime;
     }
@@ -952,16 +965,18 @@ private:
             .pAttachments = &colorBlendAttachment
         };
 
+        uint32_t pointerSize = sizeof(vk::DeviceAddress);
+        uint32_t shaderDataPointerCount = 1;
         vk::PushConstantRange pushConstantRange = {
             .stageFlags = vk::ShaderStageFlagBits::eVertex,
-            .size = sizeof(vk::DeviceAddress)
+            .size = pointerSize * shaderDataPointerCount
         };
 
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo {
-            .setLayoutCount = 1,
-            .pSetLayouts = &*m_DescriptorSetLayout,
-            .pushConstantRangeCount = 1,
-            .pPushConstantRanges = &pushConstantRange
+            .setLayoutCount = 1,                                    // # of descriptor set layouts
+            .pSetLayouts = &*m_DescriptorSetLayout,                 // Pointer to descriptor set layouts
+            .pushConstantRangeCount = 1,                            // # of push constant ranges
+            .pPushConstantRanges = &pushConstantRange               // Pointer to push constant ranges
         };
         m_PipelineLayout = vk::raii::PipelineLayout(m_Device, pipelineLayoutInfo);
 
@@ -1035,12 +1050,14 @@ private:
         return format == vk::Format::eD32SfloatS8Uint || format == vk::Format::eD24UnormS8Uint;
     }
 
-    void loadTexture() {
-        auto textureHandle = m_ResourceManager.load<Texture>(TEXTURE_NAME);
+    void loadTextures() {
+        auto vikingRoomTextureHandle = m_ResourceManager.load<Texture>(VIKING_ROOM_TEXTURE_NAME);
+        auto terrainTextureHandle = m_ResourceManager.load<Texture>(TERRAIN_TEXTURE_NAME);
     }
 
-    void loadModel() {
-        auto modelHandle = m_ResourceManager.load<Mesh>(MODEL_NAME);
+    void loadModels() {
+        auto vikingRoomModelHandle = m_ResourceManager.load<Mesh>(VIKING_ROOM_MODEL_NAME);
+        auto terrainModelhandle = m_ResourceManager.load<Mesh>(TERRAIN_MODEL_NAME);
     }
 
     vk::raii::CommandBuffer beginSingleTimeCommands() {
@@ -1069,7 +1086,7 @@ private:
 
     void createShaderBuffers() {
         m_ShaderDataBuffers = m_VulkanResourceService->createShaderBuffers(
-            sizeof(ShaderData), MAX_FRAMES_IN_FLIGHT
+            sizeof(ShaderData) * m_ResourceManager.getResourceTypeCount<Texture>(), MAX_FRAMES_IN_FLIGHT
         );
     }
 
@@ -1108,19 +1125,29 @@ private:
         m_TextureDescriptorSet = std::move(m_Device.allocateDescriptorSets(textureDescriptorSetAllocInfo).front());
 
         // For more than one texture, existing textures need to be collected into an array and written from there
-        auto textureImage = m_ResourceManager.getResource<Texture>(TEXTURE_NAME);
-        vk::DescriptorImageInfo imageInfo = {
-            .sampler = textureImage->getSampler(),
-            .imageView = textureImage->getImageView(),
-            .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
+        // TODO make something more robust
+        std::array<Texture *, 2> textures = {
+            m_ResourceManager.getResource<Texture>(VIKING_ROOM_TEXTURE_NAME),
+            m_ResourceManager.getResource<Texture>(TERRAIN_TEXTURE_NAME)
         };
+
+        std::vector<vk::DescriptorImageInfo> textureDescriptors {};
+        for (auto i = 0; i < variableDescCount; ++i) {
+            vk::DescriptorImageInfo imageInfo = {
+                .sampler = textures[i]->getSampler(),
+                .imageView = textures[i]->getImageView(),
+                .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
+            };
+
+            textureDescriptors.push_back(imageInfo);
+        }
 
         vk::WriteDescriptorSet writeDescriptorSet = {
             .dstSet = m_TextureDescriptorSet,
             .dstBinding = 0,
-            .descriptorCount = 1,
+            .descriptorCount = static_cast<uint32_t>(textureDescriptors.size()),
             .descriptorType = vk::DescriptorType::eCombinedImageSampler,
-            .pImageInfo = &imageInfo
+            .pImageInfo = textureDescriptors.data()
         };
 
         m_Device.updateDescriptorSets(writeDescriptorSet, {});
@@ -1165,31 +1192,23 @@ private:
         vk::ClearValue clearColor = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f);
         vk::ClearValue clearDepth = vk::ClearDepthStencilValue(1.0f, 0);
 
-        vk::RenderingAttachmentInfo colorAttachmentInfo {};
+        vk::RenderingAttachmentInfo colorAttachmentInfo = {
+            .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+            .resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+            .loadOp = vk::AttachmentLoadOp::eClear,
+            .storeOp = vk::AttachmentStoreOp::eStore,
+            .clearValue = clearColor
+        };
 
         if (m_MsaaSamples == vk::SampleCountFlagBits::e1) {
-            colorAttachmentInfo = {
-                .imageView = m_SwapChainImageViews[imageIndex],
-                .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-                .resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-                .loadOp = vk::AttachmentLoadOp::eClear,
-                .storeOp = vk::AttachmentStoreOp::eStore,
-                .clearValue = clearColor
-            };
+            colorAttachmentInfo.imageView = m_SwapChainImageViews[imageIndex];
         } else {
             // Multisampled color attachment with resolve attachment
             // According to spec, if resolveMode is not RESOLVE_MODE_NONE, and resolveImageView is not null,
             // a render pass multisample resolve operation is defined for the attachment subresource.
-            colorAttachmentInfo = {
-                .imageView = m_ColorImageView,
-                .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-                .resolveMode = vk::ResolveModeFlagBits::eAverage,
-                .resolveImageView = m_SwapChainImageViews[imageIndex],
-                .resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-                .loadOp = vk::AttachmentLoadOp::eClear,
-                .storeOp = vk::AttachmentStoreOp::eStore,
-                .clearValue = clearColor
-            };
+            colorAttachmentInfo.imageView = m_ColorImageView;
+            colorAttachmentInfo.resolveMode = vk::ResolveModeFlagBits::eAverage;
+            colorAttachmentInfo.resolveImageView = m_SwapChainImageViews[imageIndex];
         }
 
         vk::RenderingAttachmentInfo depthAttachmentInfo = {
@@ -1211,7 +1230,7 @@ private:
         commandBuffer.beginRendering(renderingInfo);
 
         // TODO: is this efficient to do every time we record the command buffer? (I assume not)
-        const auto vikingRoomMesh = m_ResourceManager.getResource<Mesh>(MODEL_NAME);
+        const auto vikingRoomMesh = m_ResourceManager.getResource<Mesh>(VIKING_ROOM_MODEL_NAME);
 
         commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *m_GraphicsPipeline);
         commandBuffer.bindVertexBuffers(0, vikingRoomMesh->getVertexBuffer(), { 0 });
@@ -1235,6 +1254,22 @@ private:
         commandBuffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), m_SwapChainExtent));
         commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_PipelineLayout, 0, *m_TextureDescriptorSet, nullptr);
         commandBuffer.drawIndexed(vikingRoomMesh->getIndexCount(), 1, 0, 0, 0);
+
+        const auto terrainMesh = m_ResourceManager.getResource<Mesh>(TERRAIN_MODEL_NAME);
+        commandBuffer.bindVertexBuffers(0, terrainMesh->getVertexBuffer(), { 0 });
+        commandBuffer.bindIndexBuffer(terrainMesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
+        vk::DeviceAddress bdaPtr = m_ShaderDataBuffers[m_FrameIndex].bufferDeviceAddress;
+        bdaPtr += sizeof(ShaderData);
+
+        commandBuffer.pushConstants(
+            m_PipelineLayout,
+            vk::ShaderStageFlagBits::eVertex,
+            0,
+            sizeof(vk::DeviceAddress),
+            &bdaPtr
+        );
+
+        commandBuffer.drawIndexed(terrainMesh->getIndexCount(), 1, 0, 0, 0);
 
         // Draw ImGui
         ImGui::Render();
