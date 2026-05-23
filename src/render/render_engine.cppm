@@ -660,6 +660,7 @@ private:
                                                     vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
         bool supportsRequiredFeatures =
             features.get<vk::PhysicalDeviceFeatures2>().features.samplerAnisotropy &&
+            features.get<vk::PhysicalDeviceFeatures2>().features.shaderInt64 &&
             features.get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters &&
             features.get<vk::PhysicalDeviceVulkan12Features>().shaderSampledImageArrayNonUniformIndexing &&
             features.get<vk::PhysicalDeviceVulkan12Features>().descriptorBindingVariableDescriptorCount &&
@@ -710,7 +711,12 @@ private:
             vk::PhysicalDeviceVulkan13Features,
             vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
         > featureChain = {
-            { .features = { .samplerAnisotropy = true } },                   // vk::PhysicalDeviceFeatures2
+            {                                                                   // vk::PhysicalDeviceFeatures2
+                .features = {
+                    .samplerAnisotropy = true,
+                    .shaderInt64 = true
+                }
+            },
             { .shaderDrawParameters = true },                                 // Enable shader draw parameters from Vulkan 1.1, necessary for shader objects (I think)
             {
                 .descriptorIndexing = true,                                     // Enable descriptor indexing for "bindless" uniforms
@@ -916,7 +922,9 @@ private:
     }
 
     void createGraphicsPipeline() {
-        vk::raii::ShaderModule shaderModule = createShaderModule(readFile("shaders/slang.spv"));
+        // vk::raii::ShaderModule shaderModule = createShaderModule(readFile("shaders/slang.spv"));
+        vk::raii::ShaderModule vsShaderModule = createShaderModule(readFile("shaders/hlsl-vs.spv"));
+        vk::raii::ShaderModule psShaderModule = createShaderModule(readFile("shaders/hlsl-ps.spv"));
 
         auto bindingDescription = Vertex::getBindingDescription();
         auto attributeDescriptions = Vertex::getAttributeDescriptions();
@@ -931,13 +939,13 @@ private:
         // can also add .pSpecializationInfo parameter to specify and optimize shader constants
         vk::PipelineShaderStageCreateInfo vertShaderStageInfo {
             .stage = vk::ShaderStageFlagBits::eVertex,
-            .module = shaderModule,
-            .pName = "vertMain"
+            .module = vsShaderModule,
+            .pName = "VSMain"
         };
         vk::PipelineShaderStageCreateInfo fragShaderStageInfo {
             .stage = vk::ShaderStageFlagBits::eFragment,
-            .module = shaderModule,
-            .pName = "fragMain"
+            .module = psShaderModule,
+            .pName = "PSMain"
         };
         vk::PipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
 
@@ -999,7 +1007,7 @@ private:
             .pushConstantRangeCount = 1,                            // # of push constant ranges
             .pPushConstantRanges = &pushConstantRange               // Pointer to push constant ranges
         };
-        m_PipelineLayout = vk::raii::PipelineLayout(m_Device, pipelineLayoutInfo);
+        m_GraphicsPipelineLayout = vk::raii::PipelineLayout(m_Device, pipelineLayoutInfo);
 
         vk::Format depthFormat = m_VulkanResourceService->findDepthFormat();
         vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo {
@@ -1019,7 +1027,7 @@ private:
             .pDepthStencilState = &depthStencil,
             .pColorBlendState = &colorBlending,
             .pDynamicState = &dynamicState,
-            .layout = m_PipelineLayout,
+            .layout = m_GraphicsPipelineLayout,
             .renderPass = nullptr                   // we're using dynamic rendering instead of render passes
         };
 
@@ -1258,7 +1266,7 @@ private:
         commandBuffer.bindIndexBuffer(vikingRoomMesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
         // Upload ShaderData object to vertex
         commandBuffer.pushConstants(
-            m_PipelineLayout,
+            m_GraphicsPipelineLayout,
             vk::ShaderStageFlagBits::eVertex,
             0,
             sizeof(vk::DeviceAddress),
@@ -1273,7 +1281,7 @@ private:
             )
         );
         commandBuffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), m_SwapChainExtent));
-        commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_PipelineLayout, 0, *m_TextureDescriptorSet, nullptr);
+        commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_GraphicsPipelineLayout, 0, *m_TextureDescriptorSet, nullptr);
         commandBuffer.drawIndexed(vikingRoomMesh->getIndexCount(), 1, 0, 0, 0);
 
         const auto terrainMesh = m_ResourceManager.getResource<Mesh>(TERRAIN_MODEL_NAME);
@@ -1283,7 +1291,7 @@ private:
         bdaPtr += sizeof(ShaderData);
 
         commandBuffer.pushConstants(
-            m_PipelineLayout,
+            m_GraphicsPipelineLayout,
             vk::ShaderStageFlagBits::eVertex,
             0,
             sizeof(vk::DeviceAddress),
@@ -1412,7 +1420,7 @@ private:
     bool m_FramebufferResized = false;
 
     vk::raii::DescriptorSetLayout m_DescriptorSetLayout = nullptr;
-    vk::raii::PipelineLayout m_PipelineLayout = nullptr;
+    vk::raii::PipelineLayout m_GraphicsPipelineLayout = nullptr;
     vk::raii::Pipeline m_GraphicsPipeline = nullptr;
     bool m_ShadersSetToReload = false;
 

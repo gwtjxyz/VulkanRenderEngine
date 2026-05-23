@@ -167,7 +167,7 @@ add_executable(VulkanRenderEngine src/main.cpp ${IMGUI_SOURCES}
 # Compile modules
 target_sources(VulkanRenderEngine PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
-        src/core/platform.cppm src/core/input.cppm
+        src/core/platform.cppm src/core/input.cppm src/core/hlsl_compiler.cppm
         src/ecs.cppm
         src/resource/resource.cppm
         src/render/vulkan_resource_service.cppm src/render/render_engine.cppm src/render/camera.cppm
