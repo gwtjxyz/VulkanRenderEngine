@@ -162,6 +162,8 @@ target_sources(ImGui PUBLIC ${IMGUI_SOURCES})
 target_include_directories(ImGui PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backends ${IMGUI_DIR}/misc/cpp)
 target_link_libraries(ImGui PRIVATE glfw Vulkan::Headers)
 
+find_library(dxcompiler_LIBRARY NAMES dxcompiler dxcompilerd HINTS "$ENV{VULKAN_SDK}/lib" REQUIRED)
+
 add_executable(VulkanRenderEngine src/main.cpp ${IMGUI_SOURCES}
         src/misc/vulkan_loader.cpp)
 # Compile modules
@@ -175,11 +177,28 @@ target_sources(VulkanRenderEngine PUBLIC
 )
 
 target_compile_definitions(VulkanRenderEngine PRIVATE USE_CPP20_MODULES=1)
+target_include_directories(VulkanRenderEngine PRIVATE SYSTEM $ENV{VULKAN_SDK}/Include)
 
 target_link_libraries(VulkanRenderEngine PRIVATE
-        Vulkan-HppModule
-        glfw glm-module stb::stb tinyobjloader-module tinygltf::tinygltf ImGui
+        Vulkan-HppModule glfw glm-module stb::stb tinyobjloader-module  tinygltf::tinygltf ImGui
+        ${dxcompiler_LIBRARY}
 )
+
+# If on Windows, copy dxcompiler's DLLs into the build folder, otherwise the application will
+# use the Windows SDK version of dxcompiler which doesn't have SPIR-V codegen support
+# Not sure if this is the "right" way of doing things but oh well
+# If necessary, I can copy debug info with this at some point too
+if (MSVC)
+    add_custom_command(
+            TARGET VulkanRenderEngine POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy
+            "$ENV{VULKAN_SDK}/Bin/dxcompiler.dll"
+            "${CMAKE_CURRENT_BINARY_DIR}/dxcompiler.dll"
+            COMMAND ${CMAKE_COMMAND} -E copy
+            "$ENV{VULKAN_SDK}/Bin/dxcompilerd.dll"
+            "${CMAKE_CURRENT_BINARY_DIR}/dxcompilerd.dll"
+    )
+endif()
 
 # TODO Should this be somewhere else?
 if(MSVC)

@@ -24,12 +24,13 @@ import std;
 #endif
 
 import camera;
-// import ecs;
-import vulkan_resource_service;
+import ecs;
+import hlsl;
 import render_service_locator;
 import render_types;
 import resource;
 import platform;
+import vulkan_resource_service;
 
 import glm;
 
@@ -48,12 +49,6 @@ public:
 };
 
 DispatchLoaderHack dispatchLoaderHack;
-
-// #ifdef DISABLE_VULKAN_MODULE
-// #undef VULKAN_HPP_DEFAULT_DISPATCHER
-// #define VULKAN_HPP_DEFAULT_DISPATCHER dispatchLoaderHack
-// #endif
-
 #endif
 
 constexpr uint32_t WIDTH = 1600;
@@ -922,9 +917,16 @@ private:
     }
 
     void createGraphicsPipeline() {
-        // vk::raii::ShaderModule shaderModule = createShaderModule(readFile("shaders/slang.spv"));
-        vk::raii::ShaderModule vsShaderModule = createShaderModule(readFile("shaders/hlsl-vs.spv"));
-        vk::raii::ShaderModule psShaderModule = createShaderModule(readFile("shaders/hlsl-ps.spv"));
+        vk::raii::ShaderModule vsShaderModule = m_ShaderCompiler.compileShaderModule(
+            m_Device,
+            "shaders/shader.hlsl",
+            HlslShaderType::VERTEX
+        );
+        vk::raii::ShaderModule psShaderModule = m_ShaderCompiler.compileShaderModule(
+            m_Device,
+            "shaders/shader.hlsl",
+            HlslShaderType::PIXEL
+        );
 
         auto bindingDescription = Vertex::getBindingDescription();
         auto attributeDescriptions = Vertex::getAttributeDescriptions();
@@ -1377,7 +1379,6 @@ private:
     void recompileShadersAndRecreatePipeline() {
         m_Device.waitIdle();
 
-        compileShader("shaders/shader.slang", "shaders/slang.spv");
         m_GraphicsPipeline.clear();
         createGraphicsPipeline();
         m_ShadersSetToReload = false;
@@ -1386,6 +1387,7 @@ private:
 private:
     std::shared_ptr<VulkanResourceService> m_VulkanResourceService = nullptr;
     ResourceManager m_ResourceManager {};
+    HlslShaderCompiler m_ShaderCompiler {};
 
     GLFWwindow * m_Window = nullptr;
 
