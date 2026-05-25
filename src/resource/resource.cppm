@@ -370,7 +370,8 @@ private:
                 vertex.pos = {
                     attrib.vertices[3 * index.vertex_index + 0],
                     attrib.vertices[3 * index.vertex_index + 1],
-                    attrib.vertices[3 * index.vertex_index + 2]
+                    attrib.vertices[3 * index.vertex_index + 2],
+                    1
                 };
 
                 // OBJ assumes 0 = bottom of the image, but Vulkan works with 0 = top of the image, so we flip y coord
@@ -381,7 +382,8 @@ private:
                 vertex.normal = {
                     attrib.normals[3 * index.normal_index],
                     attrib.normals[3 * index.normal_index + 1],
-                    attrib.normals[3 * index.normal_index + 2]
+                    attrib.normals[3 * index.normal_index + 2],
+                    0
                 };
 
                 if (!uniqueVertices.contains(vertex)) {

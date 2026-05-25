@@ -1,6 +1,6 @@
 struct VSInput {
-    float3 inPosition; // implicitly location 0
-    float3 inNormal;    // implicitly location 1
+    float4 inPosition; // implicitly location 0
+    float4 inNormal;    // implicitly location 1
     float2 inUV; // implicitly location 2
 }
 
@@ -9,7 +9,7 @@ Sampler2D textures[];
 struct ShaderData {
     float4x4 projection;
     float4x4 view;
-    float4x4 model[1];
+    float4x4 model;
     float4 lightPos;
     uint32_t lightingEnabled;
     uint32_t textureIndex;
@@ -17,7 +17,7 @@ struct ShaderData {
 
 struct VSOutput {
     float4 pos : SV_Position;
-    float3 normal;
+    float4 normal;
     float2 UV;
     float3 lightVec;
     float3 viewVec;
@@ -26,12 +26,12 @@ struct VSOutput {
 };
 
 [shader("vertex")]
-VSOutput vertMain(VSInput input, uniform ShaderData * shaderData, uint instanceIndex : SV_VulkanInstanceID) {
+VSOutput vertMain(VSInput input, uniform ShaderData * shaderData) {
     VSOutput output;
-    float4x4 modelMatrix = shaderData->model[instanceIndex];
+    float4x4 modelMatrix = shaderData->model;
 
     output.pos = mul(shaderData->projection, mul(shaderData->view, mul(modelMatrix, float4(input.inPosition.xyz, 1.0))));
-    output.normal = mul((float3x3)mul(shaderData->view, modelMatrix), input.inNormal);
+    output.normal = mul(mul(shaderData->view, modelMatrix), input.inNormal);
     output.UV = input.inUV;
 
     // Calculate view vectors required for lighting
@@ -49,7 +49,7 @@ VSOutput vertMain(VSInput input, uniform ShaderData * shaderData, uint instanceI
 float4 fragMain(VSOutput vertIn) : SV_TARGET {
     if (vertIn.lightingEnabled == 1) {
         // Phong lighting
-        float3 N = normalize(vertIn.normal);
+        float3 N = normalize(vertIn.normal.xyz);
         float3 L = normalize(vertIn.lightVec);
         float3 V = normalize(vertIn.viewVec);
         float3 R = reflect(-L, N);
