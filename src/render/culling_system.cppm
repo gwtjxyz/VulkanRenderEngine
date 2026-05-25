@@ -1,8 +1,14 @@
 module;
 
+#ifdef DISABLE_IMPORT_STD
+#include <vector>
+#endif
+
 export module culling_system;
 
+#ifndef DISABLE_IMPORT_STD
 import std;
+#endif
 
 import camera;
 import ecs;

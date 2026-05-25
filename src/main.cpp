@@ -1,6 +1,11 @@
 #include <cstdlib>
 
+#ifndef DISABLE_IMPORT_STD
 import std;
+#else
+#include <iostream>
+#include <stdexcept>
+#endif
 
 import render_engine;
 

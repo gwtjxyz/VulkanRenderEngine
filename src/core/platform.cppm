@@ -8,9 +8,18 @@ module;
 #endif // defined(_WIN32)
 #include <stb_image.h>
 
+#ifdef DISABLE_IMPORT_STD
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <vector>
+#endif
+
 export module platform;
 
+#ifndef DISABLE_IMPORT_STD
 import std;
+#endif
 
 const std::string PROJECT_DIR = "VulkanHppTutorial"; // TODO un-hardcode?
 

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 4.1)
+cmake_minimum_required(VERSION 4.2)
 # Module std support requires different values of this depending on cmake version
 # Probably not fully correct/comprehensive for now, will update as needed
 # Values pulled from https://github.com/Kitware/CMake/blob/master/Help/dev/experimental.rst
@@ -8,9 +8,17 @@ if(CMAKE_VERSION VERSION_LESS 4.3)
 else()
     set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "451f2fe2-a8a2-47c3-bc32-94786d8fc91b") # 4.3+
 endif()
-set(CMAKE_CXX_MODULE_STD ON)
+
+# Hack to make module std work on Mac by explicitly giving CMake the module path it should use
+#set(CMAKE_CXX_STDLIB_MODULES_JSON "/opt/homebrew/opt/llvm/lib/c++/libc++.modules.json")
+
 set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 project(VulkanRenderEngine LANGUAGES CXX)
+
+# Module std is really difficult to get working on Mac and it's just not worth the hassle
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(CMAKE_CXX_MODULE_STD ON)
+endif()
 
 set(PROJECT_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
@@ -26,7 +34,7 @@ find_package (glm REQUIRED)
 find_package(stb REQUIRED)
 find_package (tinyobjloader REQUIRED)
 find_package (tinygltf REQUIRED)
-find_package (KTX REQUIRED)
+#find_package (KTX REQUIRED)
 
 # Fetch latest Vulkan headers if the installed ones are out of date
 # Usually using newer headers with older SDK versions shouldn't be
@@ -53,25 +61,25 @@ if(ENABLE_CPP20_MODULE)
         message("If CMake fails with the error \"libc++.modules.json resource does not exist\", consider applying this workaround:")
         message("https://github.com/llvm/llvm-project/issues/109895#issuecomment-3803292485")
 
-        # TODO remove?
-        set(CMAKE_LINKER_TYPE LLD)
-
-        # TODO remove once I figure out how to fix vulkan modules not working
-        add_compile_definitions(DISABLE_VULKAN_MODULE)
+        # Maybe one day module std will be usable on Mac, but not today!
+        add_compile_definitions(DISABLE_VULKAN_MODULE DISABLE_IMPORT_STD)
     endif()
 
     if (Vulkan_FOUND)
         # Set up Vulkan C++ module as a static library
         add_library(Vulkan-HppModule STATIC)
         add_library(Vulkan::HppModule ALIAS Vulkan-HppModule)
-        target_sources(Vulkan-HppModule
-                PUBLIC
-                FILE_SET CXX_MODULES
-                BASE_DIRS ${Vulkan_INCLUDE_DIR}
-                FILES
-                ${Vulkan_INCLUDE_DIR}/vulkan/vulkan.cppm
-                ${Vulkan_INCLUDE_DIR}/vulkan/vulkan_video.cppm
-        )
+
+        if(NOT DISABLE_VULKAN_MODULE)
+            target_sources(Vulkan-HppModule
+                    PUBLIC
+                    FILE_SET CXX_MODULES
+                    BASE_DIRS ${Vulkan_INCLUDE_DIR}
+                    FILES
+                    ${Vulkan_INCLUDE_DIR}/vulkan/vulkan.cppm
+                    ${Vulkan_INCLUDE_DIR}/vulkan/vulkan_video.cppm
+            )
+        endif()
     else()
         FetchContent_Declare(vulkan-headers
                 GIT_REPOSITORY "https://github.com/KhronosGroup/Vulkan-Headers.git"
@@ -86,11 +94,15 @@ if(ENABLE_CPP20_MODULE)
 
     # Configure the module target (import std currently requires C++23 with CMake)
     target_compile_features(Vulkan-HppModule PUBLIC cxx_std_23)
-    set_target_properties(Vulkan-HppModule PROPERTIES CXX_MODULE_STD ON)
+    if(NOT DISABLE_VULKAN_MODULE)
+       set_target_properties(Vulkan-HppModule PROPERTIES CXX_MODULE_STD ON)
+    endif()
 
     # Use dynamic dispatcher
     target_link_libraries(Vulkan-HppModule PUBLIC Vulkan::Headers)
+#    if (NOT DISABLE_VULKAN_MODULE)
     target_compile_definitions(Vulkan-HppModule PUBLIC VULKAN_HPP_DISPATCH_LOADER_DYNAMIC)
+#    endif()
 
     # Static dispatcher usage would look something like this
     # (currently doesn't work, would probably need to make changes to find_package(vulkan) line)
@@ -150,7 +162,8 @@ target_sources(ImGui PUBLIC ${IMGUI_SOURCES})
 target_include_directories(ImGui PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backends ${IMGUI_DIR}/misc/cpp)
 target_link_libraries(ImGui PRIVATE glfw Vulkan::Headers)
 
-add_executable(VulkanRenderEngine src/main.cpp ${IMGUI_SOURCES})
+add_executable(VulkanRenderEngine src/main.cpp ${IMGUI_SOURCES}
+        src/misc/vulkan_loader.cpp)
 # Compile modules
 target_sources(VulkanRenderEngine PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
@@ -163,7 +176,10 @@ target_sources(VulkanRenderEngine PUBLIC
 
 target_compile_definitions(VulkanRenderEngine PRIVATE USE_CPP20_MODULES=1)
 
-target_link_libraries(VulkanRenderEngine PRIVATE Vulkan-HppModule glfw glm-module stb::stb tinyobjloader-module KTX::ktx tinygltf::tinygltf ImGui)
+target_link_libraries(VulkanRenderEngine PRIVATE
+        Vulkan-HppModule
+        glfw glm-module stb::stb tinyobjloader-module tinygltf::tinygltf ImGui
+)
 
 # TODO Should this be somewhere else?
 if(MSVC)

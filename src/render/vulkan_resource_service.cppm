@@ -2,16 +2,23 @@ module;
 
 #if defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES) || defined(DISABLE_VULKAN_MODULE)
 #include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan_raii.hpp>
 #endif
 
 export module vulkan_resource_service;
 
-import std.compat;
+#ifndef DISABLE_IMPORT_STD
+import std;
+#endif
 import platform;
 
 #if !(defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES) || defined(DISABLE_VULKAN_MODULE))
 import vulkan;
 #endif
+
+using std::uint32_t;
+using std::int32_t;
+using std::memcpy;
 
 export struct VulkanImageData {
     vk::Image image = nullptr;

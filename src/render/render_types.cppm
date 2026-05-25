@@ -8,7 +8,9 @@ module;
 
 export module render_types;
 
-import std.compat;
+#ifndef DISABLE_IMPORT_STD
+import std;
+#endif
 
 import glm;
 #if !(defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES) || defined(DISABLE_VULKAN_MODULE))
