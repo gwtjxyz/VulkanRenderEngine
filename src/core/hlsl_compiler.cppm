@@ -9,11 +9,17 @@ module;
 #endif
 
 // For non-Windows platforms, dxcapi's WinAdapter should take care of types defined inside atlbase
-#include <dxc/dxcapi.h>
+#include <dxcapi.h>
 
-export module hlsl;
+#ifdef DISABLE_IMPORT_STD
+#include <iostream>
+#endif
 
-import std.compat;
+export module hlsl_compiler;
+
+#ifndef DISABLE_IMPORT_STD
+import std;
+#endif
 
 import platform;
 
@@ -54,7 +60,12 @@ public:
         uint32_t codePage = DXC_CP_ACP;
         CComPtr<IDxcBlobEncoding> sourceBlob;
         auto absolutePath = pathFromProjectDir(relativePath);
-        hres = m_Utils->LoadFile(absolutePath.c_str(), &codePage, &sourceBlob);
+        // Have to do it like this for cross-platform compatibility
+        // Reasonable operating systems (read: non-Windows) don't use wchar for paths,
+        // but dxcompiler's API expects them
+        auto absolutePathWstr = absolutePath.wstring();
+        auto * absolutePathWstrData = absolutePathWstr.c_str();
+        hres = m_Utils->LoadFile(absolutePathWstrData, &codePage, &sourceBlob);
         if (FAILED(hres)) {
             throw std::runtime_error("Could not load shader file with path " + absolutePath.string());
         }
@@ -81,7 +92,7 @@ public:
         // Configure the compiler arguments for compiling the HLSL shader to SPIR-V
         std::array arguments = {
             // Shader file name for debugging
-            absolutePath.c_str(),
+            absolutePathWstrData,
             L"-E", entryPoint,
             L"-T", targetProfile,
             L"-spirv"

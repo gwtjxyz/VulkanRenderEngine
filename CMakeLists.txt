@@ -9,16 +9,20 @@ else()
     set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "451f2fe2-a8a2-47c3-bc32-94786d8fc91b") # 4.3+
 endif()
 
-# Hack to make module std work on Mac by explicitly giving CMake the module path it should use
-#set(CMAKE_CXX_STDLIB_MODULES_JSON "/opt/homebrew/opt/llvm/lib/c++/libc++.modules.json")
-
 set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 project(VulkanRenderEngine LANGUAGES CXX)
 
 # Module std is really difficult to get working on Mac and it's just not worth the hassle
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     set(CMAKE_CXX_MODULE_STD ON)
+else()
+    # Hack to make module std work on Mac by explicitly giving CMake the module path it should use
+    # Really shouldn't need this since we're no longer using stdlib modules on Mac, but otherwise
+    # the fetchcontent version of vulkan-headers fails and I can't be bothered figuring out how to fix that
+    # ABI conflicts here don't matter since we're not using the compiled modules despite building them
+    set(CMAKE_CXX_STDLIB_MODULES_JSON "/opt/homebrew/opt/llvm/lib/c++/libc++.modules.json")
 endif()
+
 
 set(PROJECT_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
@@ -33,7 +37,7 @@ find_package (glfw3 REQUIRED)
 find_package (glm REQUIRED)
 find_package(stb REQUIRED)
 find_package (tinyobjloader REQUIRED)
-find_package (tinygltf REQUIRED)
+#find_package (tinygltf REQUIRED)
 #find_package (KTX REQUIRED)
 
 # Fetch latest Vulkan headers if the installed ones are out of date
@@ -90,6 +94,7 @@ if(ENABLE_CPP20_MODULE)
         FetchContent_MakeAvailable(vulkan-headers)
         # make sure to set up the include path for CMake
         set(Vulkan_INCLUDE_DIR "${vulkan-headers_SOURCE_DIR}/include")
+        message("Vulkan_INCLUDE_DIR is ${Vulkan_INCLUDE_DIR}")
     endif()
 
     # Configure the module target (import std currently requires C++23 with CMake)
@@ -177,10 +182,12 @@ target_sources(VulkanRenderEngine PUBLIC
 )
 
 target_compile_definitions(VulkanRenderEngine PRIVATE USE_CPP20_MODULES=1)
-target_include_directories(VulkanRenderEngine PRIVATE SYSTEM $ENV{VULKAN_SDK}/Include)
+target_include_directories(VulkanRenderEngine PRIVATE BEFORE ${Vulkan_INCLUDE_DIR})
+# If I specify the overall vulkan sdk include folder, it overrides the fetched headers on my Mac and I have no idea why
+target_include_directories(VulkanRenderEngine PRIVATE AFTER $ENV{VULKAN_SDK}/Include/dxc)
 
 target_link_libraries(VulkanRenderEngine PRIVATE
-        Vulkan-HppModule glfw glm-module stb::stb tinyobjloader-module  tinygltf::tinygltf ImGui
+        Vulkan-HppModule glfw glm-module stb::stb tinyobjloader-module ImGui
         ${dxcompiler_LIBRARY}
 )
 

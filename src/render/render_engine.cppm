@@ -25,7 +25,7 @@ import std;
 
 import camera;
 import ecs;
-import hlsl;
+import hlsl_compiler;
 import render_service_locator;
 import render_types;
 import resource;
