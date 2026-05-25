@@ -6,6 +6,10 @@ module;
 #include <vulkan/vulkan_raii.hpp>
 #endif
 
+#ifdef DISABLE_IMPORT_STD
+#include <iostream>
+#endif
+
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
@@ -15,10 +19,12 @@ module;
 
 export module render_engine;
 
-import std.compat;
+#ifndef DISABLE_IMPORT_STD
+import std;
+#endif
 
 import camera;
-import ecs;
+// import ecs;
 import vulkan_resource_service;
 import render_service_locator;
 import render_types;
@@ -42,6 +48,12 @@ public:
 };
 
 DispatchLoaderHack dispatchLoaderHack;
+
+// #ifdef DISABLE_VULKAN_MODULE
+// #undef VULKAN_HPP_DEFAULT_DISPATCHER
+// #define VULKAN_HPP_DEFAULT_DISPATCHER dispatchLoaderHack
+// #endif
+
 #endif
 
 constexpr uint32_t WIDTH = 1600;
@@ -67,7 +79,6 @@ static void checkVkResult(VkResult err) {
     if (err == 0)
         return;
     std::cerr << "[vulkan] Error: VkResult = " << err << std::endl;
-    __debugbreak();
     // TODO: don't know if we really want to crash on any Vulkan error inside ImGui
     if (err < 0)
         abort();
@@ -466,12 +477,18 @@ private:
 
     void createInstance() {
         // Initialize default vulkan dynamic loader
+        // If we're using the vulkan module, the module will do it for us, and we just need to convince our IDE that
+        // the code is valid; otherwise, we need to use a macro to do it ourselves.
+#ifdef DISABLE_VULKAN_MODULE
+        VULKAN_HPP_DEFAULT_DISPATCHER.init();
+#else
 #ifdef __JETBRAINS_IDE__
         auto & vulkanLoader = dispatchLoaderHack;
 #else
         auto & vulkanLoader = vk::detail::defaultDispatchLoaderDynamic;
 #endif
         vulkanLoader.init();
+#endif
 
         constexpr vk::ApplicationInfo appInfo {
             .pApplicationName = "Hello Triangle",
@@ -536,7 +553,11 @@ private:
         m_Instance = vk::raii::Instance(m_Context, createInfo);
 
         // Load function pointers into created instance
+#ifdef DISABLE_VULKAN_MODULE
+        VULKAN_HPP_DEFAULT_DISPATCHER.init(*m_Instance);
+#else
         vulkanLoader.init(*m_Instance);
+#endif
     }
 
     void setupDebugMessenger() {

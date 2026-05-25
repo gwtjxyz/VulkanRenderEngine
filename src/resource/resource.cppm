@@ -1,15 +1,23 @@
 module;
 
 #include <cassert>
-#include <typeindex>
 
 #if defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES) || defined(DISABLE_VULKAN_MODULE)
 #include <vulkan/vulkan.hpp>
 #endif
 
+#ifdef DISABLE_IMPORT_STD
+#include <memory>
+#include <print>
+#include <typeindex>
+#include <unordered_map>
+#endif
+
 export module resource;
 
+#ifndef DISABLE_IMPORT_STD
 import std;
+#endif
 import platform;
 import render_service_locator;
 import render_types;
@@ -117,7 +125,7 @@ public:
     }
 
     template<typename T>
-    [[nodiscrd]] uint32_t getResourceTypeCount() {
+    [[nodiscard]] uint32_t getResourceTypeCount() {
         auto & typeResources = m_Resources[std::type_index(typeid(T))];
         return typeResources.size();
     }

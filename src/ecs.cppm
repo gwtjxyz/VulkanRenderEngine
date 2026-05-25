@@ -1,8 +1,16 @@
 module;
 
+#ifdef DISABLE_IMPORT_STD
+#include <memory>
+#include <string>
+#include <unordered_map>
+#endif
+
 export module ecs;
 
+#ifndef DISABLE_IMPORT_STD
 import std;
+#endif
 import glm;
 
 import render_types;
@@ -14,6 +22,8 @@ import resource;
 
 // Forward declaration
 export class Entity;
+
+using std::size_t;
 
 export class ComponentTypeIDSystem {
 public:
