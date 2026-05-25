@@ -27,6 +27,8 @@ import tinyobjloader;
 import vulkan;
 #endif
 
+using std::uint32_t;
+
 // Resource base class
 export class Resource {
 public:

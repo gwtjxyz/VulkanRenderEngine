@@ -16,6 +16,10 @@ import platform;
 import vulkan;
 #endif
 
+using std::uint32_t;
+using std::int32_t;
+using std::memcpy;
+
 export struct VulkanImageData {
     vk::Image image = nullptr;
     vk::DeviceMemory imageMemory = nullptr;
