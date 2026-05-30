@@ -1,11 +1,14 @@
-# Vulkan toy project
+# Vulkan rendering engine
 
 ---
 
-A repository for me playing around with Vulkan (and Vulkan's C++ bindings, to be more specific)
-while making sense of CMake and C++ modules. Builds and runs on Windows and Mac (unfortunately couldn't get
-Vulkan's modules to work on Mac though), with Mac generally having some delays in terms of features - meaning
-sometimes something gets added to Windows's version that breaks Mac until fixed later on.
+Rendering engine project using Vulkan 1.4, C++23, C++20 modules, and HLSL shaders. The goal of the
+project is to learn more about graphics programming, various render techniques, low-level
+graphics APIs, and their more modern features.
+
+Builds and runs on Windows and Mac, with Mac generally having some delays in terms of features - meaning
+sometimes something gets added to Windows's version that breaks Mac until fixed later on. Notably, Mac
+doesn't use standard library modules, because its stdlib has no support for them whatsoever.
 
 ## Currently implemented features
 
@@ -14,9 +17,14 @@ sometimes something gets added to Windows's version that breaks Mac until fixed 
 - Basic lighting model
 - Shader hot reloading
 - Bindless texture access
+- Interactive UI
+- Compute particles
+- HLSL shader compiler
 
 For a more comprehensive list of planned and implemented features, check the [To-Do list](ToDoList.md) file.
 
-## Example
+## Examples
 
 ![image](readme/vulkan.png)
+
+![image](readme/particles.png)
