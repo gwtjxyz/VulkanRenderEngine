@@ -1,5 +1,7 @@
 module;
 
+#include <cassert>
+
 #if defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES) || defined(DISABLE_VULKAN_MODULE)
 #include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan_raii.hpp>
@@ -40,6 +42,13 @@ export struct VulkanShaderBufferData {
     vk::DeviceMemory bufferMemory = nullptr;
     void * mappedMemory = nullptr;
     vk::DeviceAddress bufferDeviceAddress = 0;          // offset this to access/modify data in the shader
+};
+
+// Doesn't have mapped memory
+export struct VulkanComputeBufferData {
+    vk::Buffer buffer = nullptr;
+    vk::DeviceMemory bufferMemory = nullptr;
+    vk::DeviceAddress bufferDeviceAddress = 0;
 };
 
 // "Backbone" of the renderer, holds functions related to memory/resource allocation
@@ -130,6 +139,61 @@ public:
         }
 
         return shaderBufferData;
+    }
+
+    template <typename T>
+    std::vector<VulkanComputeBufferData> createComputeBuffers(int maxFramesInFlight, std::vector<T> & data) {
+        assert(!data.empty(), "Cannot create compute buffers without supplying any data to them!");
+
+        std::vector<VulkanComputeBufferData> computeBufferData {};
+
+        vk::Buffer stagingBuffer {};
+        vk::DeviceMemory stagingBufferMemory {};
+
+        vk::DeviceSize bufferSize = sizeof(data[0]) * data.size();
+        createBuffer(
+            bufferSize,
+            vk::BufferUsageFlagBits::eTransferSrc,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+            stagingBuffer,
+            stagingBufferMemory
+        );
+
+        void * stagingData = m_Device.mapMemory(stagingBufferMemory, 0, bufferSize);
+        memcpy(stagingData, data.data(), bufferSize);
+        m_Device.unmapMemory(stagingBufferMemory);
+
+        for (size_t i = 0; i < maxFramesInFlight; ++i) {
+            vk::Buffer computeBuffer;
+            vk::DeviceMemory computeBufferMemory;
+            createBuffer(
+                bufferSize,
+                vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eVertexBuffer |
+                vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+                vk::MemoryPropertyFlagBits::eDeviceLocal,
+                computeBuffer,
+                computeBufferMemory
+            );
+            copyBuffer(stagingBuffer, computeBuffer, bufferSize);
+
+            vk::BufferDeviceAddressInfo deviceAddressInfo = {
+                .buffer = computeBuffer
+            };
+            vk::DeviceAddress bufferDeviceAddress = m_Device.getBufferAddress(deviceAddressInfo);
+
+            computeBufferData.emplace_back(
+                VulkanComputeBufferData {
+                    .buffer = computeBuffer,
+                    .bufferMemory = computeBufferMemory,
+                    .bufferDeviceAddress = bufferDeviceAddress
+                }
+            );
+        }
+
+        m_Device.freeMemory(stagingBufferMemory);
+        m_Device.destroyBuffer(stagingBuffer);
+
+        return computeBufferData;
     }
 
     VulkanImageData createGenericResources(
@@ -646,7 +710,7 @@ private:
         return m_Device.createSampler(samplerInfo);
     }
 
-    vk::Format findSupportedFormat(const std::vector<vk::Format> & candidates, vk::ImageTiling tiling, vk::FormatFeatureFlags features) {
+    vk::Format findSupportedFormat(const std::vector<vk::Format> & candidates, vk::ImageTiling tiling, vk::FormatFeatureFlags features) const {
         for (const auto format : candidates) {
             vk::FormatProperties props = m_PhysicalDevice.getFormatProperties(format);
             if (tiling == vk::ImageTiling::eLinear && (props.linearTilingFeatures & features) == features) {
@@ -659,6 +723,7 @@ private:
 
         throw std::runtime_error("Failed to find supported format!");
     }
+
 private:
     // Storing hpp-wrapped Vulkan handles instead of RAII objects so that we can work with them through here
     // but still clean them up from elsewhere and not worry about deinitialization order

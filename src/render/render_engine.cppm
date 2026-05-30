@@ -51,8 +51,9 @@ public:
 DispatchLoaderHack dispatchLoaderHack;
 #endif
 
-constexpr uint32_t WIDTH = 1600;
-constexpr uint32_t HEIGHT = 900;
+constexpr uint32_t WIDTH = 1280;
+constexpr uint32_t HEIGHT = 720;
+constexpr uint32_t PARTICLE_COUNT = 8192;
 const std::string VIKING_ROOM_MODEL_NAME = "viking_room";
 const std::string VIKING_ROOM_TEXTURE_NAME = "viking_room";
 const std::string TERRAIN_MODEL_NAME = "terrain";
@@ -76,7 +77,7 @@ static void checkVkResult(VkResult err) {
     std::cerr << "[vulkan] Error: VkResult = " << err << std::endl;
     // TODO: don't know if we really want to crash on any Vulkan error inside ImGui
     if (err < 0)
-        abort();
+        std::abort();
 }
 
 // Upper layer of the renderer, performs rendering and interfaces with the resource manager
@@ -199,31 +200,47 @@ private:
         loadTextures();
         loadModels();
         createDescriptorSetLayout();
+        createComputePipeline();
         createGraphicsPipeline();
+        createPointGraphicsPipeline();
         createColorResources();
         createDepthResources();
-        createShaderBuffers();
+        createShaderDataBuffers();
+        createComputeBuffers();
         createDescriptorPool();
         createDescriptorSets();
         createCommandBuffers();
+        createComputeCommandBuffers();
         createSyncObjects();
     }
 
     void mainLoop() {
         advanceDeltaTime();
 
+        uint32_t frameCount = 0;
         while (!glfwWindowShouldClose(m_Window)) {
             auto timeAtFrameStart = std::chrono::high_resolution_clock::now();
+            static auto timeSinceLastFpsMeasurement = timeAtFrameStart;
+
             advanceDeltaTime();
+
             glfwPollEvents();
             processInput(m_Window, m_Camera, m_DeltaTime);
+
             if (m_ShadersSetToReload) {
                 recompileShadersAndRecreatePipeline();
             }
             drawFrame();
+
             auto timeAtFrameEnd = std::chrono::high_resolution_clock::now();
-            auto frameTime = timeAtFrameEnd - timeAtFrameStart;
-            m_Fps = std::chrono::duration(std::chrono::seconds(1)) / frameTime;
+            m_FrameTimeMs = std::chrono::duration<float, std::chrono::milliseconds::period>(timeAtFrameEnd - timeAtFrameStart).count();
+
+            frameCount++;
+            if (timeAtFrameEnd - timeSinceLastFpsMeasurement >= std::chrono::duration(std::chrono::seconds(1))) {
+                m_Fps = frameCount;
+                frameCount = 0;
+                timeSinceLastFpsMeasurement = timeAtFrameEnd;
+            }
         }
 
         m_Device.waitIdle();
@@ -287,6 +304,11 @@ private:
             deviceHandle.destroyBuffer(shaderDataBuffer.buffer);
         }
 
+        for (const auto & computeDataBuffer : m_ComputeDataBuffers) {
+            deviceHandle.freeMemory(computeDataBuffer.bufferMemory);
+            deviceHandle.destroyBuffer(computeDataBuffer.buffer);
+        }
+
         m_ResourceManager.unloadAll();
 
         ImGui_ImplVulkan_Shutdown();
@@ -306,59 +328,111 @@ private:
         // Draw our custom UI widget
         drawUI();
 
-        // Note: m_InFlightFences, m_PresentCompleteSemaphores and m_CommandBuffers are indexed by frameIndex,
-        // while m_RenderFinishedSemaphores is indexed by imageIndex
-
+        auto [result, imageIndex] = m_SwapChain.acquireNextImage(UINT64_MAX, nullptr, *m_InFlightFences[m_FrameIndex]);
         auto fenceResult = m_Device.waitForFences(*m_InFlightFences[m_FrameIndex], vk::True, UINT64_MAX);
         if (fenceResult != vk::Result::eSuccess) {
             throw std::runtime_error("Failed to wait for fence!");
         }
 
-        auto [result, imageIndex] = m_SwapChain.acquireNextImage(UINT64_MAX, *m_PresentCompleteSemaphores[m_FrameIndex], nullptr);
-
-        // TODO: do we need to define VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS somehow?
-        if (result == vk::Result::eErrorOutOfDateKHR) {
-            recreateSwapChain();
-            return;
-        }
-        if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR) {
-            assert(result == vk::Result::eTimeout || result == vk::Result::eNotReady);
-            throw std::runtime_error("Failed to acquire swap chain image!");
-        }
-
         // Only reset the fence if we are submitting work
         m_Device.resetFences(*m_InFlightFences[m_FrameIndex]);
 
-        m_CommandBuffers[m_FrameIndex].reset();
-        updateShaderData(m_FrameIndex);
-        recordCommandBuffer(imageIndex);
+        // Update timeline value for this frame
+        uint64_t computeWaitValue = m_TimelineValue;
+        uint64_t computeSignalValue = ++m_TimelineValue;
+        uint64_t graphicsWaitValue = computeSignalValue;
+        uint64_t graphicsSignalValue = ++m_TimelineValue;
 
-        vk::PipelineStageFlags waitDestinationStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
-        const vk::SubmitInfo submitInfo = {
-            .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &*m_PresentCompleteSemaphores[m_FrameIndex],             // wait for this semaphore before executing
-            .pWaitDstStageMask = &waitDestinationStageMask,                             // which pipeline stage to wait on
-            .commandBufferCount = 1,
-            .pCommandBuffers = &*m_CommandBuffers[m_FrameIndex],
-            .signalSemaphoreCount = 1,
-            .pSignalSemaphores = &*m_RenderFinishedSemaphores[imageIndex]             // which semaphore to signal after executing
-        };
-        m_GraphicsQueue.submit(submitInfo, *m_InFlightFences[m_FrameIndex]); // <-- signals m_DrawFence once command execution is complete
+        updateComputePushConstants();
+        updateShaderData();
 
-        const vk::PresentInfoKHR presentInfoKHR = {
-            .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &*m_RenderFinishedSemaphores[imageIndex],
-            .swapchainCount = 1,
-            .pSwapchains = &*m_SwapChain,
-            .pImageIndices = &imageIndex
-        };
-        result = m_GraphicsQueue.presentKHR(presentInfoKHR);
-        if ((result == vk::Result::eSuboptimalKHR) || (result == vk::Result::eErrorOutOfDateKHR) || m_FramebufferResized) {
-            m_FramebufferResized = false;
-            recreateSwapChain();
-        } else {
-            // There are no other success codes other than eSuccess; on any error code, presentKHR already threw an exception.
-            assert(result == vk::Result::eSuccess);
+        // Compute
+        {
+            // If particles are toggled off, don't compute or render anything
+            // Still need to "submit" work after in order to signal semaphores, otherwise
+            // the following stages would wait forever and freeze the program
+            if (m_ParticlesEnabled) {
+                recordComputeCommandBuffer();
+            }
+            // Submit compute work
+            vk::TimelineSemaphoreSubmitInfo computeTimelineInfo = {
+                .waitSemaphoreValueCount = 1,
+                .pWaitSemaphoreValues = &computeWaitValue,
+                .signalSemaphoreValueCount = 1,
+                .pSignalSemaphoreValues = &computeSignalValue
+            };
+
+            vk::PipelineStageFlags waitStages[] = { vk::PipelineStageFlagBits::eComputeShader };
+
+            vk::SubmitInfo computeSubmitInfo = {
+                .pNext = &computeTimelineInfo,
+                .waitSemaphoreCount = 1,
+                .pWaitSemaphores = &*m_Semaphore,
+                .pWaitDstStageMask = waitStages,
+                .commandBufferCount = 1,
+                .pCommandBuffers = &*m_ComputeCommandBuffers[m_FrameIndex],
+                .signalSemaphoreCount = 1,
+                .pSignalSemaphores = &*m_Semaphore
+            };
+
+            m_GraphicsQueue.submit(computeSubmitInfo, nullptr);
+        }
+
+        // Graphics
+        {
+            recordCommandBuffer(imageIndex);
+
+            // Submit graphics work (wait for compute to finish)
+            vk::PipelineStageFlags waitDestinationStageMask(vk::PipelineStageFlagBits::eVertexInput);
+
+            vk::TimelineSemaphoreSubmitInfo graphicsTimelineInfo = {
+                .waitSemaphoreValueCount = 1,
+                .pWaitSemaphoreValues = &graphicsWaitValue,
+                .signalSemaphoreValueCount = 1,
+                .pSignalSemaphoreValues = &graphicsSignalValue
+            };
+
+            const vk::SubmitInfo graphicsSubmitInfo = {
+                .pNext = &graphicsTimelineInfo,
+                .waitSemaphoreCount = 1,
+                .pWaitSemaphores = &*m_Semaphore,
+                .pWaitDstStageMask = &waitDestinationStageMask,
+                .commandBufferCount = 1,
+                .pCommandBuffers = &*m_CommandBuffers[m_FrameIndex],
+                .signalSemaphoreCount = 1,
+                .pSignalSemaphores = &*m_Semaphore
+            };
+
+            m_GraphicsQueue.submit(graphicsSubmitInfo, nullptr);
+
+            // Present the image (wait for graphics to finish)
+            vk::SemaphoreWaitInfo waitInfo = {
+                .semaphoreCount = 1,
+                .pSemaphores = &*m_Semaphore,
+                .pValues = &graphicsSignalValue
+            };
+            // Wait for graphics to complete before presenting
+            result = m_Device.waitSemaphores(waitInfo, UINT64_MAX);
+            if (result != vk::Result::eSuccess) {
+                throw std::runtime_error("failed to wait for semaphores!");
+            }
+
+            const vk::PresentInfoKHR presentInfoKHR = {
+                .waitSemaphoreCount = 0,                                        // No binary semaphores needed
+                .pWaitSemaphores = nullptr,
+                .swapchainCount = 1,
+                .pSwapchains = &*m_SwapChain,
+                .pImageIndices = &imageIndex
+            };
+
+            result = m_GraphicsQueue.presentKHR(presentInfoKHR);
+            if ((result == vk::Result::eSuboptimalKHR) || (result == vk::Result::eErrorOutOfDateKHR) || m_FramebufferResized) {
+                m_FramebufferResized = false;
+                recreateSwapChain();
+            } else {
+                // There are no other success codes other than eSuccess; on any error code, presentKHR already threw an exception.
+                assert(result == vk::Result::eSuccess);
+            }
         }
 
         m_FrameIndex = (m_FrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
@@ -389,6 +463,7 @@ private:
 
         ImGui::PushItemWidth(-labelWidth);
         ImGui::Text("FPS: %lld", m_Fps);
+        ImGui::Text("Frametime: %.4f ms", m_FrameTimeMs);
         ImGui::Spacing();
         ImGui::Text("Controls: WASD to move, Space/Control to move up/down");
         ImGui::Text("Esc to show/hide mouse, Q to exit, R to reload shaders");
@@ -398,6 +473,8 @@ private:
                 ImGui::TableNextColumn();
                 ImGui::Checkbox("Lighting enabled", &m_IsLightingEnabled);
                 ImGui::Checkbox("Model spin enabled", &m_IsModelSpinEnabled);
+                ImGui::TableNextColumn();
+                ImGui::Checkbox("Particles enabled", &m_ParticlesEnabled);
                 ImGui::EndTable();
             }
             ImGui::Spacing();
@@ -426,11 +503,10 @@ private:
 
         auto currentTime = std::chrono::high_resolution_clock::now();
         m_DeltaTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-        // std::println("m_DeltaTime: {}", m_DeltaTime);
         startTime = currentTime;
     }
 
-    void updateShaderData(uint32_t currentImage) {
+    void updateShaderData() const {
         static auto startTime = std::chrono::high_resolution_clock::now();
 
         auto currentTime = std::chrono::high_resolution_clock::now();
@@ -450,6 +526,7 @@ private:
             vikingRoomModel = glm::rotate(vikingRoomModel, time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         }
 
+        // Viking room
         shaderData[0].model = vikingRoomModel;
         shaderData[0].view = m_Camera.getViewMatrix();
         shaderData[0].projection = m_Camera.getProjectionMatrix();
@@ -458,6 +535,7 @@ private:
         shaderData[0].lightingEnabled = m_IsLightingEnabled;
         shaderData[0].textureIndex = 0;
 
+        // Terrain
         shaderData[1].model = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-20.0f, -15.0f, 30.0f)), glm::vec3(0.2f, 0.2f, 0.2f));
         shaderData[1].view = m_Camera.getViewMatrix();
         shaderData[1].projection = m_Camera.getProjectionMatrix();
@@ -466,8 +544,18 @@ private:
         shaderData[1].lightingEnabled = m_IsLightingEnabled;
         shaderData[1].textureIndex = 1;
 
-        memcpy(m_ShaderDataBuffers[currentImage].mappedMemory, &shaderData, sizeof(shaderData));
+        memcpy(m_ShaderDataBuffers[m_FrameIndex].mappedMemory, &shaderData, sizeof(shaderData));
         startTime = currentTime;
+    }
+
+    void updateComputePushConstants() {
+        m_ComputePushConstants.addressThisFrame = m_ComputeDataBuffers[m_FrameIndex].bufferDeviceAddress;
+        if (m_FrameIndex > 0) {
+            m_ComputePushConstants.addressLastFrame = m_ComputeDataBuffers[m_FrameIndex - 1].bufferDeviceAddress;
+        } else {
+            m_ComputePushConstants.addressLastFrame = m_ComputeDataBuffers[MAX_FRAMES_IN_FLIGHT - 1].bufferDeviceAddress;
+        }
+        m_ComputePushConstants.deltaTime = m_DeltaTime;
     }
 
     void createInstance() {
@@ -662,6 +750,7 @@ private:
             features.get<vk::PhysicalDeviceVulkan12Features>().runtimeDescriptorArray &&
             features.get<vk::PhysicalDeviceVulkan12Features>().bufferDeviceAddress &&
             features.get<vk::PhysicalDeviceVulkan12Features>().descriptorIndexing &&
+            features.get<vk::PhysicalDeviceVulkan12Features>().timelineSemaphore &&
             features.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
             features.get<vk::PhysicalDeviceVulkan13Features>().synchronization2 &&
             features.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState;
@@ -686,10 +775,13 @@ private:
     void createLogicalDevice() {
         std::vector<vk::QueueFamilyProperties> queueFamilyProperties = m_PhysicalDevice.getQueueFamilyProperties();
 
+        // Just using one queue for everything for now for simplicity's sake
+        // TODO use multiple queues eventually
         for (uint32_t qfpIndex = 0; qfpIndex < queueFamilyProperties.size(); qfpIndex++) {
             if ((queueFamilyProperties[qfpIndex].queueFlags & vk::QueueFlagBits::eGraphics) &&
+                (queueFamilyProperties[qfpIndex].queueFlags & vk::QueueFlagBits::eCompute) &&
                 m_PhysicalDevice.getSurfaceSupportKHR(qfpIndex, *m_Surface)) {
-                // found a queue family that supports both graphics and present
+                // found a queue family that supports graphics, compute and present
                 m_QueueIndex = qfpIndex;
                 break;
             }
@@ -718,6 +810,7 @@ private:
                 .shaderSampledImageArrayNonUniformIndexing = true,
                 .descriptorBindingVariableDescriptorCount = true,
                 .runtimeDescriptorArray = true,
+                .timelineSemaphore = true,
                 .bufferDeviceAddress = true                                     // Enable accessing buffers via pointers instead of needing descriptors
             },
             { .synchronization2 = true, .dynamicRendering = true },           // Enable dynamic rendering from Vulkan 1.3
@@ -913,19 +1006,47 @@ private:
             .pBindings = bindings.data()
         };
 
-        m_DescriptorSetLayout = vk::raii::DescriptorSetLayout(m_Device, layoutInfo);
+        m_TextureDescriptorSetLayout = vk::raii::DescriptorSetLayout(m_Device, layoutInfo);
+    }
+
+    void createComputePipeline() {
+        auto [csShaderModule, csShaderStageInfo] = m_ShaderCompiler.compileAndGetCreateInfo(
+            m_Device,
+            "shaders/particle_compute_shader.hlsl",
+            HlslShaderStage::COMPUTE
+        );
+
+        vk::PushConstantRange pushConstantRange = {
+            .stageFlags = vk::ShaderStageFlagBits::eCompute,
+            .size = sizeof(ComputePushConstants)
+        };
+
+        vk::PipelineLayoutCreateInfo pipelineLayoutInfo = {
+            .setLayoutCount = 0,
+            .pSetLayouts = nullptr,
+            .pushConstantRangeCount = 1,
+            .pPushConstantRanges = &pushConstantRange
+        };
+        m_ComputePipelineLayout = m_Device.createPipelineLayout(pipelineLayoutInfo);
+
+        vk::ComputePipelineCreateInfo pipelineCreateInfo = {
+            .stage = csShaderStageInfo,
+            .layout = m_ComputePipelineLayout
+        };
+
+        m_ComputePipeline = m_Device.createComputePipeline(nullptr, pipelineCreateInfo);
     }
 
     void createGraphicsPipeline() {
-        vk::raii::ShaderModule vsShaderModule = m_ShaderCompiler.compileShaderModule(
+        auto [vsShaderModule, vsShaderStageInfo] = m_ShaderCompiler.compileAndGetCreateInfo(
             m_Device,
-            "shaders/shader.hlsl",
-            HlslShaderType::VERTEX
+            "shaders/main_shader.hlsl",
+            HlslShaderStage::VERTEX
         );
-        vk::raii::ShaderModule psShaderModule = m_ShaderCompiler.compileShaderModule(
+        auto [psShaderModule, psShaderStageInfo] = m_ShaderCompiler.compileAndGetCreateInfo(
             m_Device,
-            "shaders/shader.hlsl",
-            HlslShaderType::PIXEL
+            "shaders/main_shader.hlsl",
+            HlslShaderStage::PIXEL
         );
 
         auto bindingDescription = Vertex::getBindingDescription();
@@ -937,23 +1058,14 @@ private:
             .vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size()),
             .pVertexAttributeDescriptions = attributeDescriptions.data()
         };
-
-        // can also add .pSpecializationInfo parameter to specify and optimize shader constants
-        vk::PipelineShaderStageCreateInfo vertShaderStageInfo {
-            .stage = vk::ShaderStageFlagBits::eVertex,
-            .module = vsShaderModule,
-            .pName = "VSMain"
-        };
-        vk::PipelineShaderStageCreateInfo fragShaderStageInfo {
-            .stage = vk::ShaderStageFlagBits::eFragment,
-            .module = psShaderModule,
-            .pName = "PSMain"
-        };
-        vk::PipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
+        vk::PipelineShaderStageCreateInfo shaderStages[] = { vsShaderStageInfo, psShaderStageInfo };
 
         vk::PipelineInputAssemblyStateCreateInfo inputAssembly { .topology = vk::PrimitiveTopology::eTriangleList };
 
-        std::vector<vk::DynamicState> dynamicStates = { vk::DynamicState::eViewport, vk::DynamicState::eScissor };
+        std::vector<vk::DynamicState> dynamicStates = {
+            vk::DynamicState::eViewport,
+            vk::DynamicState::eScissor
+        };
         vk::PipelineDynamicStateCreateInfo dynamicState {
             .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()),
             .pDynamicStates = dynamicStates.data()
@@ -996,16 +1108,14 @@ private:
             .pAttachments = &colorBlendAttachment
         };
 
-        uint32_t pointerSize = sizeof(vk::DeviceAddress);
-        uint32_t shaderDataPointerCount = 1;
         vk::PushConstantRange pushConstantRange = {
             .stageFlags = vk::ShaderStageFlagBits::eVertex,
-            .size = pointerSize * shaderDataPointerCount
+            .size = sizeof(VertexPushConstants)
         };
 
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo {
             .setLayoutCount = 1,                                    // # of descriptor set layouts
-            .pSetLayouts = &*m_DescriptorSetLayout,                 // Pointer to descriptor set layouts
+            .pSetLayouts = &*m_TextureDescriptorSetLayout,                 // Pointer to descriptor set layouts
             .pushConstantRangeCount = 1,                            // # of push constant ranges
             .pPushConstantRanges = &pushConstantRange               // Pointer to push constant ranges
         };
@@ -1034,6 +1144,122 @@ private:
         };
 
         m_GraphicsPipeline = vk::raii::Pipeline(m_Device, nullptr, pipelineInfo);
+    }
+
+    void createPointGraphicsPipeline() {
+        auto [vsShaderModule, vsShaderStageInfo] = m_ShaderCompiler.compileAndGetCreateInfo(
+            m_Device,
+            "shaders/particle_graphics_shader.hlsl",
+            HlslShaderStage::VERTEX
+        );
+        auto [psShaderModule, psShaderStageInfo] = m_ShaderCompiler.compileAndGetCreateInfo(
+            m_Device,
+            "shaders/particle_graphics_shader.hlsl",
+            HlslShaderStage::PIXEL
+        );
+
+        auto bindingDescription = Particle::getBindingDescription();
+        auto attributeDescriptions = Particle::getAttributeDescriptions();
+
+        vk::PipelineVertexInputStateCreateInfo vertexInputInfo {
+            .vertexBindingDescriptionCount = 1,
+            .pVertexBindingDescriptions = &bindingDescription,
+            .vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size()),
+            .pVertexAttributeDescriptions = attributeDescriptions.data()
+        };
+
+        vk::PipelineShaderStageCreateInfo shaderStages[] = { vsShaderStageInfo, psShaderStageInfo };
+
+        vk::PipelineInputAssemblyStateCreateInfo inputAssembly { .topology = vk::PrimitiveTopology::ePointList };
+
+        std::vector<vk::DynamicState> dynamicStates = {
+            vk::DynamicState::eViewport,
+            vk::DynamicState::eScissor
+        };
+        vk::PipelineDynamicStateCreateInfo dynamicState {
+            .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()),
+            .pDynamicStates = dynamicStates.data()
+        };
+        vk::PipelineViewportStateCreateInfo viewportState { .viewportCount = 1, .scissorCount = 1 };
+
+        vk::PipelineRasterizationStateCreateInfo rasterizer {
+            .depthClampEnable = vk::False,
+            .rasterizerDiscardEnable = vk::False,
+            .polygonMode = vk::PolygonMode::eFill,
+            .cullMode = vk::CullModeFlagBits::eBack,
+            .frontFace = vk::FrontFace::eCounterClockwise,
+            .depthBiasEnable = vk::False,
+            .lineWidth = 1.0f
+        };
+
+        vk::PipelineMultisampleStateCreateInfo multisampling {
+            .rasterizationSamples = m_MsaaSamples,
+            .sampleShadingEnable = vk::False
+        };
+
+        vk::PipelineDepthStencilStateCreateInfo depthStencil {
+            .depthTestEnable = vk::False,
+            .depthWriteEnable = vk::True,
+            .depthCompareOp = vk::CompareOp::eLess,
+            .depthBoundsTestEnable = vk::False,
+            .stencilTestEnable = vk::False
+        };
+
+        vk::PipelineColorBlendAttachmentState colorBlendAttachment {
+            .blendEnable = vk::True,
+            .srcColorBlendFactor = vk::BlendFactor::eSrcAlpha,
+            .dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha,
+            .colorBlendOp = vk::BlendOp::eAdd,
+            .srcAlphaBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha,
+            .dstAlphaBlendFactor = vk::BlendFactor::eZero,
+            .alphaBlendOp = vk::BlendOp::eAdd,
+            .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA
+        };
+
+        vk::PipelineColorBlendStateCreateInfo colorBlending {
+            .logicOpEnable = vk::False,
+            .logicOp = vk::LogicOp::eCopy,
+            .attachmentCount = 1,
+            .pAttachments = &colorBlendAttachment
+        };
+
+        vk::PushConstantRange pushConstantRange = {
+            .stageFlags = vk::ShaderStageFlagBits::eVertex,
+            .size = sizeof(VertexPushConstants)
+        };
+
+        vk::PipelineLayoutCreateInfo pipelineLayoutInfo {
+            .setLayoutCount = 0,                                    // # of descriptor set layouts
+            .pSetLayouts = nullptr,                                 // Pointer to descriptor set layouts
+            .pushConstantRangeCount = 1,                            // # of push constant ranges
+            .pPushConstantRanges = &pushConstantRange               // Pointer to push constant ranges
+        };
+        m_PointGraphicsPipelineLayout = vk::raii::PipelineLayout(m_Device, pipelineLayoutInfo);
+
+        vk::Format depthFormat = m_VulkanResourceService->findDepthFormat();
+        vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo {
+            .colorAttachmentCount = 1,
+            .pColorAttachmentFormats = &m_SwapChainSurfaceFormat.format,
+            .depthAttachmentFormat = depthFormat
+        };
+
+        vk::GraphicsPipelineCreateInfo pipelineInfo {
+            .pNext = &pipelineRenderingCreateInfo,
+            .stageCount = 2,
+            .pStages = shaderStages,
+            .pVertexInputState = &vertexInputInfo,
+            .pInputAssemblyState = &inputAssembly,
+            .pViewportState = &viewportState,
+            .pRasterizationState = &rasterizer,
+            .pMultisampleState = &multisampling,
+            .pDepthStencilState = &depthStencil,
+            .pColorBlendState = &colorBlending,
+            .pDynamicState = &dynamicState,
+            .layout = m_GraphicsPipelineLayout,
+            .renderPass = nullptr                   // we're using dynamic rendering instead of render passes
+        };
+
+        m_PointGraphicsPipeline = vk::raii::Pipeline(m_Device, nullptr, pipelineInfo);
     }
 
     [[nodiscard]]
@@ -1115,10 +1341,41 @@ private:
         m_GraphicsQueue.waitIdle();
     }
 
-    void createShaderBuffers() {
+    void createShaderDataBuffers() {
+        // Count should be equal to number of objects drawn
+        // Currently we have 1 object per mesh so this works
+        // FIXME change in the future because this will break with more models!
+        uint32_t shaderDataObjectCount = m_ResourceManager.getResourceTypeCount<Mesh>();
         m_ShaderDataBuffers = m_VulkanResourceService->createShaderBuffers(
-            sizeof(ShaderData) * m_ResourceManager.getResourceTypeCount<Texture>(), MAX_FRAMES_IN_FLIGHT
+            sizeof(ShaderData) * shaderDataObjectCount, MAX_FRAMES_IN_FLIGHT
         );
+    }
+
+    void createComputeBuffers() {
+        // Initialize particles
+        std::default_random_engine randomnessEngine(static_cast<unsigned>(std::time(nullptr)));
+        std::uniform_real_distribution<float> randomDistribution(0.0f, 1.0f);
+
+        // Initial particles positions on a circle
+        float pi = 3.14159265358979323846f;
+        std::vector<Particle> particles(PARTICLE_COUNT);
+        for (auto & particle : particles) {
+            float r = 0.25f * std::sqrtf(randomDistribution(randomnessEngine));
+            float theta = randomDistribution(randomnessEngine) * 2.0f * pi;
+            float x = r * std::cosf(theta) * HEIGHT / WIDTH;
+            float y = r * std::sinf(theta);
+
+            particle.position = glm::vec4(x, y, 1.0f, 1.0f);
+            particle.velocity = normalize(glm::vec2(x, y)) * 0.00025f;
+            particle.color = glm::vec4(
+                randomDistribution(randomnessEngine),
+                randomDistribution(randomnessEngine),
+                randomDistribution(randomnessEngine),
+                1.0f
+            );
+        }
+
+        m_ComputeDataBuffers = m_VulkanResourceService->createComputeBuffers(MAX_FRAMES_IN_FLIGHT, particles);
     }
 
     void createDescriptorPool() {
@@ -1150,7 +1407,7 @@ private:
             .pNext = &variableDescCountAllocInfo,
             .descriptorPool = m_DescriptorPool,
             .descriptorSetCount = 1,
-            .pSetLayouts = &*m_DescriptorSetLayout
+            .pSetLayouts = &*m_TextureDescriptorSetLayout
         };
         m_TextureDescriptorSet.clear();
         m_TextureDescriptorSet = std::move(m_Device.allocateDescriptorSets(textureDescriptorSetAllocInfo).front());
@@ -1194,8 +1451,19 @@ private:
         m_CommandBuffers = vk::raii::CommandBuffers(m_Device, allocInfo);
     }
 
+    void createComputeCommandBuffers() {
+        vk::CommandBufferAllocateInfo allocInfo = {
+            .commandPool = m_CommandPool,
+            .level = vk::CommandBufferLevel::ePrimary,
+            .commandBufferCount = MAX_FRAMES_IN_FLIGHT
+        };
+
+        m_ComputeCommandBuffers = vk::raii::CommandBuffers(m_Device, allocInfo);
+    }
+
     void recordCommandBuffer(uint32_t imageIndex) {
         auto & commandBuffer = m_CommandBuffers[m_FrameIndex];
+        commandBuffer.reset();
         commandBuffer.begin({});
 
         // Before starting rendering, transition the swapchain image to COLOR_ATTACHMENT_OPTIMAL
@@ -1260,21 +1528,7 @@ private:
 
         commandBuffer.beginRendering(renderingInfo);
 
-        // TODO: is this efficient to do every time we record the command buffer? (I assume not)
-        const auto vikingRoomMesh = m_ResourceManager.getResource<Mesh>(VIKING_ROOM_MODEL_NAME);
-
-        commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *m_GraphicsPipeline);
-        commandBuffer.bindVertexBuffers(0, vikingRoomMesh->getVertexBuffer(), { 0 });
-        commandBuffer.bindIndexBuffer(vikingRoomMesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
-        // Upload ShaderData object to vertex
-        commandBuffer.pushConstants(
-            m_GraphicsPipelineLayout,
-            vk::ShaderStageFlagBits::eVertex,
-            0,
-            sizeof(vk::DeviceAddress),
-            &m_ShaderDataBuffers[m_FrameIndex].bufferDeviceAddress
-        );
-
+        // Set common command buffer values
         commandBuffer.setViewport(
             0, vk::Viewport(
                 0.0f, 0.0f,
@@ -1283,21 +1537,66 @@ private:
             )
         );
         commandBuffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), m_SwapChainExtent));
-        commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_GraphicsPipelineLayout, 0, *m_TextureDescriptorSet, nullptr);
-        commandBuffer.drawIndexed(vikingRoomMesh->getIndexCount(), 1, 0, 0, 0);
 
-        const auto terrainMesh = m_ResourceManager.getResource<Mesh>(TERRAIN_MODEL_NAME);
-        commandBuffer.bindVertexBuffers(0, terrainMesh->getVertexBuffer(), { 0 });
-        commandBuffer.bindIndexBuffer(terrainMesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
-        vk::DeviceAddress bdaPtr = m_ShaderDataBuffers[m_FrameIndex].bufferDeviceAddress;
-        bdaPtr += sizeof(ShaderData);
+        VertexPushConstants vertexPushConstants = {
+            .shaderDataStartAddress = m_ComputeDataBuffers[m_FrameIndex].bufferDeviceAddress,
+            .shaderDataIndex = 0,
+            .particlesEnabled = m_ParticlesEnabled,
+        };
+
+        // Draw particles
+        commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_PointGraphicsPipeline);
+        commandBuffer.bindVertexBuffers(0, m_ComputeDataBuffers[m_FrameIndex].buffer, { 0 });
+        commandBuffer.pushConstants(
+            m_PointGraphicsPipelineLayout,
+            vk::ShaderStageFlagBits::eVertex,
+            0,
+            sizeof(VertexPushConstants),
+            &vertexPushConstants
+        );
+        commandBuffer.draw(PARTICLE_COUNT, 1, 0, 0);
+
+        // Common model rendering bindings
+        commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *m_GraphicsPipeline);
+        commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_GraphicsPipelineLayout, 0, *m_TextureDescriptorSet, nullptr);
 
         commandBuffer.pushConstants(
             m_GraphicsPipelineLayout,
             vk::ShaderStageFlagBits::eVertex,
             0,
-            sizeof(vk::DeviceAddress),
-            &bdaPtr
+            sizeof(VertexPushConstants),
+            &vertexPushConstants
+        );
+
+        // Draw viking room mesh
+        const auto vikingRoomMesh = m_ResourceManager.getResource<Mesh>(VIKING_ROOM_MODEL_NAME);
+
+        commandBuffer.bindVertexBuffers(0, vikingRoomMesh->getVertexBuffer(), { 0 });
+        commandBuffer.bindIndexBuffer(vikingRoomMesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
+
+        vertexPushConstants.shaderDataStartAddress = m_ShaderDataBuffers[m_FrameIndex].bufferDeviceAddress;
+        commandBuffer.pushConstants(
+            m_GraphicsPipelineLayout,
+            vk::ShaderStageFlagBits::eVertex,
+            0,
+            sizeof(VertexPushConstants),
+            &vertexPushConstants
+        );
+
+        commandBuffer.drawIndexed(vikingRoomMesh->getIndexCount(), 1, 0, 0, 0);
+
+        // Draw terrain mesh
+        const auto terrainMesh = m_ResourceManager.getResource<Mesh>(TERRAIN_MODEL_NAME);
+        commandBuffer.bindVertexBuffers(0, terrainMesh->getVertexBuffer(), { 0 });
+        commandBuffer.bindIndexBuffer(terrainMesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
+        vertexPushConstants.shaderDataIndex = 1;
+
+        commandBuffer.pushConstants(
+            m_GraphicsPipelineLayout,
+            vk::ShaderStageFlagBits::eVertex,
+            0,
+            sizeof(VertexPushConstants),
+            &vertexPushConstants
         );
 
         commandBuffer.drawIndexed(terrainMesh->getIndexCount(), 1, 0, 0, 0);
@@ -1305,7 +1604,6 @@ private:
         // Draw ImGui
         ImGui::Render();
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), *m_CommandBuffers[m_FrameIndex]);
-
         commandBuffer.endRendering();
 
         // After rendering, transition the swapchain image to PRESENT_SRC
@@ -1320,16 +1618,36 @@ private:
         commandBuffer.end();
     }
 
+    void recordComputeCommandBuffer() {
+        auto & commandBuffer = m_ComputeCommandBuffers[m_FrameIndex];
+        commandBuffer.reset();
+
+        commandBuffer.reset();
+        commandBuffer.begin({});
+        commandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_ComputePipeline);
+        commandBuffer.pushConstants(
+            m_ComputePipelineLayout,
+            vk::ShaderStageFlagBits::eCompute,
+            0,
+            sizeof(ComputePushConstants),
+            &m_ComputePushConstants
+        );
+        // Correlates to [numthreads(x, y, z)] inside the shader
+        commandBuffer.dispatch(PARTICLE_COUNT / 256, 1, 1);
+        commandBuffer.end();
+    }
+
     void createSyncObjects() {
-        assert(m_PresentCompleteSemaphores.empty() && m_RenderFinishedSemaphores.empty() && m_InFlightFences.empty());
+        assert(m_InFlightFences.empty());
+
+        vk::SemaphoreTypeCreateInfo semaphoreType = {
+            .semaphoreType = vk::SemaphoreType::eTimeline,
+            .initialValue = 0
+        };
+        m_Semaphore = m_Device.createSemaphore({ .pNext = &semaphoreType });
 
         for (size_t i = 0; i < m_SwapChainImages.size(); ++i) {
-            m_RenderFinishedSemaphores.emplace_back(m_Device, vk::SemaphoreCreateInfo());
-        }
-
-        for (size_t i = 0; i < m_SwapChainImages.size(); ++i) {
-            m_PresentCompleteSemaphores.emplace_back(m_Device, vk::SemaphoreCreateInfo());
-            m_InFlightFences.emplace_back(m_Device, vk::FenceCreateInfo { .flags = vk::FenceCreateFlagBits::eSignaled });
+            m_InFlightFences.emplace_back(m_Device, vk::FenceCreateInfo {});
         }
     }
 
@@ -1379,8 +1697,13 @@ private:
     void recompileShadersAndRecreatePipeline() {
         m_Device.waitIdle();
 
+        m_ComputePipeline.clear();
         m_GraphicsPipeline.clear();
+        m_PointGraphicsPipeline.clear();
+
+        createComputePipeline();
         createGraphicsPipeline();
+        createPointGraphicsPipeline();
         m_ShadersSetToReload = false;
     }
 
@@ -1394,10 +1717,12 @@ private:
     Camera m_Camera {};
 
     float m_DeltaTime = 0.0f;
-    uint64_t m_Fps = 0;
+    float m_FrameTimeMs = 0.0f;
+    uint32_t m_Fps = 0;
 
     // Dynamic shader data
     bool m_IsLightingEnabled = true;
+    bool m_ParticlesEnabled = true;
     glm::vec4 m_LightPosition = { 0.0f, -10.0f, 10.0f, 0.0f };
 
     bool m_IsWindowFocused = true;
@@ -1421,16 +1746,24 @@ private:
     std::vector<vk::raii::ImageView> m_SwapChainImageViews;
     bool m_FramebufferResized = false;
 
-    vk::raii::DescriptorSetLayout m_DescriptorSetLayout = nullptr;
+    vk::raii::PipelineLayout m_ComputePipelineLayout = nullptr;
+    vk::raii::Pipeline m_ComputePipeline = nullptr;
+
+    vk::raii::DescriptorSetLayout m_TextureDescriptorSetLayout = nullptr;
     vk::raii::PipelineLayout m_GraphicsPipelineLayout = nullptr;
     vk::raii::Pipeline m_GraphicsPipeline = nullptr;
+
+    vk::raii::PipelineLayout m_PointGraphicsPipelineLayout = nullptr;
+    vk::raii::Pipeline m_PointGraphicsPipeline = nullptr;
+
     bool m_ShadersSetToReload = false;
 
     vk::raii::CommandPool m_CommandPool = nullptr;
     std::vector<vk::raii::CommandBuffer> m_CommandBuffers {};
+    std::vector<vk::raii::CommandBuffer> m_ComputeCommandBuffers {};
 
-    std::vector<vk::raii::Semaphore> m_PresentCompleteSemaphores {};
-    std::vector<vk::raii::Semaphore> m_RenderFinishedSemaphores {};
+    vk::raii::Semaphore m_Semaphore = nullptr;
+    uint64_t m_TimelineValue = 0;
     std::vector<vk::raii::Fence> m_InFlightFences {};
     uint32_t m_FrameIndex = 0;
 
@@ -1441,6 +1774,9 @@ private:
     // We'll optimize this once there's an actual need/reason to do so.
 
     std::vector<VulkanShaderBufferData> m_ShaderDataBuffers {};
+    std::vector<VulkanComputeBufferData> m_ComputeDataBuffers {};
+    ComputePushConstants m_ComputePushConstants {};
+
     vk::raii::DescriptorPool m_DescriptorPool = nullptr;
     vk::raii::DescriptorSet m_TextureDescriptorSet = nullptr;
 

@@ -17,6 +17,8 @@ import glm;
 import vulkan;
 #endif
 
+using std::uint32_t;
+
 export struct Vertex {
     glm::vec4 pos;
     glm::vec4 normal;
@@ -57,6 +59,39 @@ export struct ShaderData {
     alignas(16) glm::vec4 lightPos { 0.0f, -10.0f, 10.0f, 0.0f };
     uint32_t lightingEnabled = { 1 };
     uint32_t textureIndex = { 0 };
+};
+
+// Same data layout as Vertex struct so we can use the same shader for both, even though most of this data isn't used
+export struct Particle {
+    glm::vec4 position;
+    glm::vec4 color;
+    glm::vec2 velocity;
+
+    static vk::VertexInputBindingDescription getBindingDescription() {
+        return {.binding = 0, .stride = sizeof(Particle), .inputRate = vk::VertexInputRate::eVertex};
+    }
+
+    // Velocity is only used inside compute shader = don't need to have an attribute description for it
+    static std::array<vk::VertexInputAttributeDescription, 2> getAttributeDescriptions() {
+        return {
+            vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32B32A32Sfloat, offsetof(Particle, position)),
+            vk::VertexInputAttributeDescription(1, 0, vk::Format::eR32G32B32A32Sfloat, offsetof(Particle, color)),
+        };
+    }
+};
+
+// SSBO pointers for compute shaders are referenced from here
+export struct ComputePushConstants {
+    vk::DeviceAddress addressThisFrame;
+    vk::DeviceAddress addressLastFrame;
+    float deltaTime;
+    uint32_t particlesEnabled;
+};
+
+export struct VertexPushConstants {
+    vk::DeviceAddress shaderDataStartAddress;
+    uint32_t shaderDataIndex;
+    uint32_t particlesEnabled;
 };
 
 export struct Plane {

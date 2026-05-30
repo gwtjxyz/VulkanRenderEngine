@@ -1,3 +1,5 @@
+#include "vertex_push_constants.hlsl"
+
 struct VSInput {
     float4 inPosition: POSITION0;
     float4 inNormal: NORMAL0;
@@ -17,14 +19,10 @@ struct ShaderData {
     float4 lightPos;
     uint lightingEnabled;
     uint textureIndex;
+    uint64_t padding;
 };
 
-struct ShaderDataOffset {
-    uint64_t address;
-};
-
-[[vk::push_constant]] ConstantBuffer<ShaderDataOffset> shaderDataOffset;
-
+// Obviously very inefficient (storing flags as uints instead of bits), but for just toying around it's not a big deal
 struct VSOutput {
     float4 pos : SV_POSITION;
     float4 normal : NORMAL0;
@@ -40,7 +38,11 @@ VSOutput VSMain(VSInput input) {
 
     // DXC's way of supporting buffer_device_address extension, since DX12's HLSL doesn't have support for pointers
     // more info here: https://github.com/microsoft/DirectXShaderCompiler/blob/main/docs/SPIR-V.rst#rawbufferload-and-rawbufferstore
-    ShaderData shaderData = vk::RawBufferLoad<ShaderData>(shaderDataOffset.address, 16);
+    ShaderData shaderData = vk::RawBufferLoad<ShaderData>(
+        vertexConstants.shaderDataStartAddress + sizeof(ShaderData) * vertexConstants.shaderDataIndex,
+        16
+    );
+
     float4x4 modelMatrix = shaderData.model;
 
     output.pos = mul(shaderData.projection, mul(shaderData.view, mul(modelMatrix, float4(input.inPosition.xyz, 1.0))));

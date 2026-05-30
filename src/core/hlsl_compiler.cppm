@@ -27,7 +27,7 @@ import platform;
 import vulkan;
 #endif
 
-export enum class HlslShaderType {
+export enum class HlslShaderStage {
     VERTEX,
     PIXEL,
     COMPUTE
@@ -52,9 +52,14 @@ public:
         if (FAILED(hres)) {
             throw std::runtime_error("Could not init DXC Utility");
         }
+
+        hres = m_Utils->CreateDefaultIncludeHandler(&m_IncludeHandler);
+        if (FAILED(hres)) {
+            throw std::runtime_error("Could not create include handler");
+        }
     }
 
-    vk::raii::ShaderModule compileShaderModule(const vk::raii::Device & device, const std::string & relativePath, HlslShaderType shaderType) const {
+    vk::raii::ShaderModule compileShaderModule(const vk::raii::Device & device, const std::string & relativePath, HlslShaderStage shaderStage) const {
         HRESULT hres;
 
         uint32_t codePage = DXC_CP_ACP;
@@ -72,16 +77,16 @@ public:
 
         LPCWSTR targetProfile {}, entryPoint {};
         // Will expand as more shader type support is required
-        switch (shaderType) {
-            case HlslShaderType::VERTEX:
+        switch (shaderStage) {
+            case HlslShaderStage::VERTEX:
                 targetProfile = L"vs_6_4";
                 entryPoint = L"VSMain";
                 break;
-            case HlslShaderType::PIXEL:
+            case HlslShaderStage::PIXEL:
                 targetProfile = L"ps_6_4";
                 entryPoint = L"PSMain";
                 break;
-            case HlslShaderType::COMPUTE:
+            case HlslShaderStage::COMPUTE:
                 targetProfile = L"cs_6_4";
                 entryPoint = L"CSMain";
                 break;
@@ -93,9 +98,10 @@ public:
         std::array arguments = {
             // Shader file name for debugging
             absolutePathWstrData,
-            L"-E", entryPoint,
-            L"-T", targetProfile,
-            L"-spirv"
+            L"-H",                              // Process includes
+            L"-E", entryPoint,                  // main function (so we can have multiple shader stages per file)
+            L"-T", targetProfile,               // Shader model
+            L"-spirv"                           // Compile for Vulkan
         };
 
         DxcBuffer buffer {};
@@ -108,7 +114,7 @@ public:
             &buffer,
             arguments.data(),
             static_cast<uint32_t>(arguments.size()),
-            nullptr,
+            m_IncludeHandler,
             IID_PPV_ARGS(&compilationResult)
         );
 
@@ -136,8 +142,41 @@ public:
         return vk::raii::ShaderModule { device, createInfo };
     }
 
+    struct ShaderInfo {
+        vk::raii::ShaderModule shaderModule = nullptr;
+        vk::PipelineShaderStageCreateInfo shaderStageInfo;
+    };
+
+    // TODO specialization info support
+    ShaderInfo compileAndGetCreateInfo(const vk::raii::Device & device, const std::string & relativePath, const HlslShaderStage shaderStage) const {
+        ShaderInfo shaderInfo {};
+        shaderInfo.shaderModule = compileShaderModule(device, relativePath, shaderStage);
+
+        vk::PipelineShaderStageCreateInfo info {};
+        info.module = shaderInfo.shaderModule;
+        switch (shaderStage) {
+            case HlslShaderStage::VERTEX:
+                info.stage = vk::ShaderStageFlagBits::eVertex;
+                info.pName = "VSMain";
+                break;
+            case HlslShaderStage::PIXEL:
+                info.stage = vk::ShaderStageFlagBits::eFragment;
+                info.pName = "PSMain";
+                break;
+            case HlslShaderStage::COMPUTE:
+                info.stage = vk::ShaderStageFlagBits::eCompute;
+                info.pName = "CSMain";
+                break;
+            default:
+                throw std::runtime_error("Unrecognized HLSL shader type");
+        }
+        shaderInfo.shaderStageInfo = info;
+
+        return shaderInfo;
+    }
 private:
     CComPtr<IDxcLibrary> m_Library;
     CComPtr<IDxcCompiler3> m_Compiler;
     CComPtr<IDxcUtils> m_Utils;
+    CComPtr<IDxcIncludeHandler> m_IncludeHandler;
 };
