@@ -1,5 +1,5 @@
-#ifndef COMPUTE_PUSH_CONSTANTS_HLSL
-#define COMPUTE_PUSH_CONSTANTS_HLSL
+#ifndef COMPUTE_PUSH_CONSTANTS_HLSLI
+#define COMPUTE_PUSH_CONSTANTS_HLSLI
 
 struct ComputeConstants {
     uint64_t addressThisFrame;
@@ -9,4 +9,4 @@ struct ComputeConstants {
 };
 [[vk::push_constant]] ConstantBuffer<ComputeConstants> computeConstants;
 
-#endif // COMPUTE_PUSH_CONSTANTS_HLSL
+#endif // COMPUTE_PUSH_CONSTANTS_HLSLI

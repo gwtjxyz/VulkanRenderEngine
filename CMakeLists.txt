@@ -10,7 +10,8 @@ else()
 endif()
 
 set(CMAKE_CXX_SCAN_FOR_MODULES ON)
-project(VulkanRenderEngine LANGUAGES CXX)
+# Need to compile flecs as C code
+project(VulkanRenderEngine LANGUAGES C CXX)
 
 # Module std is really difficult to get working on Mac and it's just not worth the hassle
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")
@@ -23,11 +24,12 @@ else()
     set(CMAKE_CXX_STDLIB_MODULES_JSON "/opt/homebrew/opt/llvm/lib/c++/libc++.modules.json")
 endif()
 
-
 set(PROJECT_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD ${PROJECT_CXX_STANDARD})
 set(CMAKE_CXX_STANDARD_REQUIRED YES)
 set(CMAKE_CXX_EXTENSIONS ON)
+
+# Debug stuff
 
 include(FetchContent)
 
@@ -160,23 +162,35 @@ target_link_libraries(ImGui PRIVATE glfw Vulkan::Headers)
 # DXC
 find_library(dxcompiler_LIBRARY NAMES dxcompiler dxcompilerd HINTS "$ENV{VULKAN_SDK}/lib" REQUIRED)
 
+# flecs
+add_library(flecs)
+set(FLECS_DIR external/flecs)
+set(FLECS_SOURCES ${FLECS_DIR}/flecs.c)
+set_source_files_properties(${FLECS_SOURCES} PROPERTIES LANGUAGE C)
+target_sources(flecs PUBLIC ${FLECS_SOURCES})
+target_include_directories(flecs PUBLIC ${FLECS_DIR})
+
 add_executable(VulkanRenderEngine src/main.cpp ${IMGUI_SOURCES}
         # Vulkan dynamic loader without using Vulkan-Hpp C++20 module
         src/misc/vulkan_loader.cpp
-        src/misc/vma_usage.cpp)
+        src/misc/vma_usage.cpp
+)
 
 # Compile modules
 target_sources(VulkanRenderEngine PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
-        src/core/platform.cppm src/core/input.cppm src/core/hlsl_compiler.cppm
-        src/ecs.cppm
+        src/core/platform.cppm src/core/input.cppm src/core/hlsl_compiler.cppm src/core/constants.cppm
+        src/entity/ecs.cppm src/entity/entity_system.cppm src/entity/components.cppm
         src/resource/resource.cppm
         src/render/render_engine.cppm src/render/camera.cppm
-        src/render/render_locator.cppm src/render/render_types.cppm src/render/culling_system.cppm
+        src/render/render_types.cppm src/render/culling_system.cppm
         src/render/rhi/vulkan_instance.cppm src/render/rhi/vulkan_resource_service.cppm
+        src/render/rhi/device_mapper.cppm src/render/rhi/pipeline_manager.cppm
 )
 
 target_compile_definitions(VulkanRenderEngine PRIVATE USE_CPP20_MODULES=1)
+target_include_directories(VulkanRenderEngine PRIVATE src)
+
 target_include_directories(VulkanRenderEngine PRIVATE BEFORE ${Vulkan_INCLUDE_DIR})
 # If I specify the overall vulkan sdk include folder, it overrides the fetched headers on my Mac and I have no idea why
 target_include_directories(VulkanRenderEngine PRIVATE AFTER $ENV{VULKAN_SDK}/Include/dxc)
@@ -184,7 +198,7 @@ target_include_directories(VulkanRenderEngine PRIVATE AFTER $ENV{VULKAN_SDK}/Inc
 target_include_directories(VulkanRenderEngine PRIVATE AFTER $ENV{VULKAN_SDK}/Include/vma)
 
 target_link_libraries(VulkanRenderEngine PRIVATE
-        Vulkan-HppModule glfw glm-module stb::stb tinyobjloader-module ImGui
+        Vulkan-HppModule glfw glm-module stb::stb tinyobjloader-module ImGui flecs
         ${dxcompiler_LIBRARY}
 )
 

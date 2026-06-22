@@ -1,4 +1,4 @@
-#include "vertex_push_constants.hlsl"
+#include "vertex_push_constants.hlsli"
 
 struct VSInput {
     [[vk::location(0)]] float4 inPosition : SV_POSITION;

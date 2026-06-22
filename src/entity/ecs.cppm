@@ -6,6 +6,9 @@ module;
 #include <unordered_map>
 #endif
 
+#include <cassert>
+#include <cstdint>
+
 export module ecs;
 
 #ifndef DISABLE_IMPORT_STD
@@ -13,6 +16,8 @@ import std;
 #endif
 import glm;
 
+import device_mapper;
+import pipeline_manager;
 import render_types;
 import resource;
 
@@ -27,11 +32,12 @@ using std::size_t;
 
 export class ComponentTypeIDSystem {
 public:
-    template<typename T>
+    template <typename T>
     static size_t getTypeID() {
         static size_t typeID = m_NextTypeID++;
         return typeID;
     }
+
 private:
     static size_t m_NextTypeID;
 };
@@ -49,7 +55,7 @@ public:
         }
     }
 
-    template<typename T>
+    template <typename T>
     static size_t getTypeID() {
         return ComponentTypeIDSystem::getTypeID<T>();
     }
@@ -81,6 +87,7 @@ public:
     [[nodiscard]] Entity * getOwner() const {
         return m_Owner;
     }
+
 public:
     enum class State {
         Uninitialized,
@@ -89,6 +96,7 @@ public:
         Destroying,
         Destroyed
     };
+
 protected:
     virtual void onInitialize() {}
     virtual void onDestroy() {}
@@ -101,10 +109,13 @@ private:
     Entity * m_Owner = nullptr;
 };
 
+export class MeshComponent;
+export class TransformComponent;
+
 // Entity class
 class Entity {
 public:
-    explicit Entity(std::string entityName) : m_Name(std::move(entityName)) {}
+    explicit Entity(const std::string & entityName) : m_Name(std::string(entityName)) {}
 
     [[nodiscard]] const std::string & getName() const {
         return m_Name;
@@ -116,10 +127,34 @@ public:
 
     void setActive(const bool active) {
         m_Active = active;
+
+        if (m_DrawBufferIndex != INDEX_UNSET) {
+            if (m_Active) {
+                DeviceMapperLocator::locate()->getDraw(m_DrawBufferIndex)->layout.enabled = true;
+            } else {
+                DeviceMapperLocator::locate()->getDraw(m_DrawBufferIndex)->layout.enabled = false;
+            }
+        }
+
+        if (m_LightBufferIndex != INDEX_UNSET) {
+            if (m_Active) {
+                DeviceMapperLocator::locate()->getLight(m_LightBufferIndex)->layout.enabled = true;
+            } else {
+                DeviceMapperLocator::locate()->getLight(m_LightBufferIndex)->layout.enabled = false;
+            }
+        }
+    }
+
+    [[nodiscard]] uint32_t getDrawBufferIndex() const {
+        return m_DrawBufferIndex;
+    }
+
+    [[nodiscard]] uint32_t getLightBufferIndex() const {
+        return m_LightBufferIndex;
     }
 
     void initialize() {
-        for (auto & component: m_Components) {
+        for (auto & component : m_Components) {
             component->initialize();
         }
     }
@@ -127,21 +162,30 @@ public:
     void update(const float deltaTime) {
         if (!m_Active) return;
 
-        for (auto & component : m_Components) {
+        for (const auto & component : m_Components) {
             component->update(deltaTime);
         }
     }
 
-    void render() {
+    void render() const {
         if (!m_Active) return;
 
         for (auto & component : m_Components) {
             component->render();
         }
+
+        if (m_DrawBufferIndex != INDEX_UNSET) {
+            auto * meshComponent = getComponent<MeshComponent>();
+            auto * transformComponent = getComponent<TransformComponent>();
+            if (meshComponent && transformComponent) {
+                auto * pipelineManager = PipelineManagerLocator::locate();
+                // pipelineManager->bindAndDrawIndexed(m_DrawBufferIndex, 1);
+            }
+        }
     }
 
-    template<typename T, typename... Args>
-    T * addComponent(Args&&... args) {
+    template <typename T, typename... Args>
+    T * addComponent(Args &&... args) {
         static_assert(std::is_base_of<Component, T>::value, "T must derive from Component");
 
         size_t typeID = Component::getTypeID<T>();
@@ -157,10 +201,11 @@ public:
         componentPtr->setOwner(this);
         m_ComponentMap[typeID] = componentPtr;
         m_Components.push_back(std::move(component));
+
         return componentPtr;
     }
 
-    template<typename T>
+    template <typename T>
     [[nodiscard]] T * getComponent() const {
         const size_t typeID = Component::getTypeID<T>();
         if (const auto it = m_ComponentMap.find(typeID); it != m_ComponentMap.end()) {
@@ -169,7 +214,7 @@ public:
         return nullptr;
     }
 
-    template<typename T>
+    template <typename T>
     bool removeComponent() {
         const size_t typeID = Component::getTypeID<T>();
         if (const auto it = m_ComponentMap.find(typeID); it != m_ComponentMap.end()) {
@@ -186,11 +231,37 @@ public:
 
         return false;
     }
+
+    void setupDrawBuffer() {
+        m_DrawBufferIndex = DeviceMapperLocator::locate()->addDraw();
+    }
+
+    void unsetDrawBuffer() {
+        if (m_DrawBufferIndex != INDEX_UNSET) {
+            DeviceMapperLocator::locate()->removeDraw(m_DrawBufferIndex);
+            m_DrawBufferIndex = INDEX_UNSET;
+        }
+    }
+
+    void setupLightBuffer() {
+        m_LightBufferIndex = DeviceMapperLocator::locate()->addLight();
+    }
+
+    void unsetLightBuffer() {
+        if (m_LightBufferIndex != INDEX_UNSET) {
+            DeviceMapperLocator::locate()->removeLight(m_LightBufferIndex);
+            m_LightBufferIndex = INDEX_UNSET;
+        }
+    }
+
 private:
     std::string m_Name;
     bool m_Active = true;
     std::vector<std::unique_ptr<Component>> m_Components {};
     std::unordered_map<size_t, Component *> m_ComponentMap;
+
+    uint32_t m_DrawBufferIndex = INDEX_UNSET;
+    uint32_t m_LightBufferIndex = INDEX_UNSET;
 };
 
 // ------------------------------------------------------------------------------------------
@@ -229,6 +300,7 @@ public:
             listener->onEvent(event);
         }
     }
+
 private:
     std::vector<EventListener *> m_Listeners {};
 };
@@ -239,11 +311,17 @@ private:
 
 // Transform component
 // Handles position, rotation, and scale of entity in 3D space
-export class TransformComponent : public Component {
+class TransformComponent : public Component {
 public:
+    TransformComponent() {}
+
     void setPosition(const glm::vec3 & pos) {
         m_Position = pos;
         m_TransformDirty = true;
+    }
+
+    void setPosition(const float x, const float y, const float z) {
+        setPosition(glm::vec3(x, y, z));
     }
 
     void setRotation(const glm::quat & rot) {
@@ -251,8 +329,28 @@ public:
         m_TransformDirty = true;
     }
 
+    void rotateX(const float angle) {
+        m_Rotation = glm::rotate(m_Rotation, glm::radians(angle), glm::vec3(1.0f, 0.0f, 0.0f));
+        m_TransformDirty = true;
+    }
+
+    void rotateY(const float angle) {
+        m_Rotation = glm::rotate(m_Rotation, glm::radians(angle), glm::vec3(0.0f, 1.0f, 0.0f));
+        m_TransformDirty = true;
+    }
+
+    void rotateZ(const float angle) {
+        m_Rotation = glm::rotate(m_Rotation, glm::radians(angle), glm::vec3(0.0f, 0.0f, 1.0f));
+        m_TransformDirty = true;
+    }
+
     void setScale(const glm::vec3 s) {
         m_Scale = s;
+        m_TransformDirty = true;
+    }
+
+    void setScale(const float s) {
+        m_Scale = glm::vec3(s);
         m_TransformDirty = true;
     }
 
@@ -268,31 +366,58 @@ public:
         return m_Scale;
     }
 
-    glm::mat4 getTransformMatrix() const {
-        if (m_TransformDirty) {
-            // Calculate transformation matrix
-            glm::mat4 translationMatrix = glm::translate(glm::mat4(1.0f), m_Position);
-            glm::mat4 rotationMatrix = glm::mat4_cast(m_Rotation);
-            glm::mat4 scaleMatrix = glm::scale(glm::mat4(1.0f), m_Scale);
-
-            m_TransformMatrix = translationMatrix * rotationMatrix * scaleMatrix;
-            m_TransformDirty = false;
-        }
-        return m_TransformMatrix;
+    uint32_t getIndex() const {
+        return m_Index;
     }
+
+protected:
+    void onInitialize() override {
+        m_DeviceMapper = DeviceMapperLocator::locate();
+        assert(m_DeviceMapper != nullptr);
+
+        // m_Index = m_DeviceMapper->addTransform(glm::mat4(1.0f));
+        m_DeviceMapper->getDraw(getOwner()->getDrawBufferIndex())->layout.transformIndex = m_Index;
+    }
+
+    void onDestroy() override {
+        m_DeviceMapper->removeTransform(m_Index);
+        m_DeviceMapper->getDraw(getOwner()->getDrawBufferIndex())->layout.transformIndex = INDEX_UNSET;
+    }
+
+    void render() override {
+        if (!m_TransformDirty) return;
+
+        auto * transformPtr = m_DeviceMapper->getTransform(m_Index);
+        transformPtr->layout.position = glm::vec4(m_Position, 1.0);
+        transformPtr->layout.rotation = glm::vec4(m_Rotation.x, m_Rotation.y, m_Rotation.z, m_Rotation.w);
+        transformPtr->layout.scale = glm::vec4(m_Scale, 0.0f);
+
+        // Calculate transformation matrix
+        const glm::mat4 translationMatrix = glm::translate(glm::mat4(1.0f), m_Position);
+        const glm::mat4 rotationMatrix = glm::mat4_cast(m_Rotation);
+        const glm::mat4 scaleMatrix = glm::scale(glm::mat4(1.0f), m_Scale);
+        //
+        // const glm::mat4 transformMatrix = translationMatrix * rotationMatrix * scaleMatrix;
+        // m_DeviceMapper->getTransform(m_Index)->layout.modelMatrix = transformMatrix;
+
+        m_TransformDirty = false;
+    }
+
 private:
     glm::vec3 m_Position = glm::vec3(0.0f);
     glm::quat m_Rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f); // Identity quaternion
     glm::vec3 m_Scale = glm::vec3(1.0f);
 
+    DeviceMapper * m_DeviceMapper = nullptr;
+
     // Cached transformation matrix
-    mutable glm::mat4 m_TransformMatrix = glm::mat4(1.0f);
+    uint32_t m_Index = INDEX_UNSET;
     mutable bool m_TransformDirty = true;
 };
 
 // Mesh component
 // Manages the visual representation of an entity by handling its 3D mesh and material
-export class MeshComponent : public Component {
+class MeshComponent : public Component {
 public:
     MeshComponent(Mesh * m, Material * mat) : m_Mesh(m), m_Material(mat) {}
 
@@ -302,6 +427,7 @@ public:
 
     void setMaterial(Material * mat) {
         m_Material = mat;
+        m_MaterialOutOfDate = true;
     }
 
     [[nodiscard]] Mesh * getMesh() const {
@@ -313,27 +439,95 @@ public:
     }
 
     [[nodiscard]] BoundingBox getBoundingBox() const {
-        return BoundingBox{}; // TODO
+        return BoundingBox {}; // TODO
     }
+
 protected:
     void render() override {
         if (!m_Mesh || !m_Material) return;
 
-        auto transform = getOwner()->getComponent<TransformComponent>();
-        if (!transform) return;
+        // m_Mesh->fillDrawData(getOwner()->getDrawBufferIndex());
 
-        // TODO uncomment and finish
-        // m_Material->bind();
-        // m_Material->setUniform("modelMatrix", transform->getTransformMatrix());
-        // m_Mesh->render();
+        // Need to set new params if either underlying material changed, or we set a different material
+        if (m_Material->update() || m_MaterialOutOfDate) {
+            DeviceMapperLocator::locate()->getDraw(getOwner()->getDrawBufferIndex())->layout.materialIndex = m_Material->getIndex();
+
+            m_MaterialOutOfDate = false;
+        }
     }
+
+    void onInitialize() override {
+        getOwner()->setupDrawBuffer();
+    }
+
+    void onDestroy() override {
+        getOwner()->unsetDrawBuffer();
+    }
+
 private:
     Mesh * m_Mesh = nullptr;
     Material * m_Material = nullptr;
+
+    bool m_MaterialOutOfDate = false;
+};
+
+// Light component
+// Manages data related to light-emitting entities
+export class LightComponent : public Component {
+public:
+    explicit LightComponent(const glm::vec3 & color = glm::vec3(1.0f), const float intensity = 1.0f)
+        : m_Color(color), m_Intensity(intensity) {}
+
+    [[nodiscard]] glm::vec3 getColor() const {
+        return m_Color;
+    }
+
+    void setColor(const glm::vec3 & color) {
+        m_Color = color;
+
+        m_LightDirty = true;
+    }
+
+    [[nodiscard]] float getIntensity() const {
+        return m_Intensity;
+    }
+
+    void setIntensity(const float intensity) {
+        m_Intensity = intensity;
+
+        m_LightDirty = true;
+    }
+
+protected:
+    void render() override {
+        if (!m_LightDirty) return;
+
+        auto * lightPtr = DeviceMapperLocator::locate()->getLight(getOwner()->getLightBufferIndex());
+        lightPtr->layout.color = m_Color;
+        lightPtr->layout.intensity = m_Intensity;
+
+        m_LightDirty = false;
+    }
+
+    void onInitialize() override {
+        getOwner()->setupLightBuffer();
+    }
+
+    void onDestroy() override {
+        getOwner()->unsetLightBuffer();
+    }
+
+private:
+    glm::vec3 m_Color;
+    float m_Intensity;
+
+    bool m_LightDirty = true;
 };
 
 export class CameraComponent : public Component {
 public:
+    CameraComponent() {}
+
     void setPerspective(float fov, float aspect, float near, float far) {
         m_FieldOfView = fov;
         m_AspectRatio = aspect;
@@ -357,7 +551,7 @@ public:
 
             return glm::lookAt(position, position + forward, up);
         }
-        return {1.0f};
+        return { 1.0f };
     }
 
     [[nodiscard]] glm::mat4 getProjectionMatrix() {
@@ -372,6 +566,7 @@ public:
         }
         return m_ProjectionMatrix;
     }
+
 private:
     float m_FieldOfView = 45.0f;
     float m_AspectRatio = 16.0f / 9.0f;
@@ -394,6 +589,7 @@ public:
     [[nodiscard]] Entity * getEntity2() const {
         return m_Entity2;
     }
+
 private:
     Entity * m_Entity1;
     Entity * m_Entity2;
@@ -419,6 +615,7 @@ protected:
         // Register as event listener
         getEventSystem().addListener(this);
     }
+
 private:
     EventSystem & getEventSystem() {
         // get event system from somewhere (e.g., service locator)

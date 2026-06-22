@@ -6,6 +6,8 @@ module;
 #include <vulkan/vulkan.hpp>
 #endif
 
+#include <cstdint> // for max value macros
+
 export module render_types;
 
 #ifndef DISABLE_IMPORT_STD
@@ -17,8 +19,15 @@ import glm;
 import vulkan;
 #endif
 
-using std::uint32_t;
-using std::int32_t;
+export typedef uint32_t hlsl_bool;
+
+export constexpr uint32_t INDEX_UNSET = UINT32_MAX;
+
+export enum class LightMode : int32_t {
+    Off = 0,
+    Phong = 1,
+    Gooch = 2
+};
 
 export struct Vertex {
     glm::vec4 pos;
@@ -53,12 +62,15 @@ struct std::hash<Vertex> {
 };
 
 // Replacement for UBOs that we address using "bindless" (buffer device address extension)
-export struct ShaderData {
+export struct MeshData {
     alignas(16) glm::mat4 projection;
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 model;
-    alignas(16) glm::vec4 lightPos { 0.0f, -10.0f, 10.0f, 0.0f };
     alignas(16) uint32_t textureIndex = { 0 };
+};
+
+export struct LightData {
+    alignas(16) glm::vec4 lightPos {};
 };
 
 // Same data layout as Vertex struct so we can use the same shader for both, even though most of this data isn't used
@@ -86,13 +98,6 @@ export struct ComputePushConstants {
     vk::DeviceAddress addressLastFrame;
     float deltaTime;
     uint32_t particlesEnabled;
-};
-
-export struct VertexPushConstants {
-    vk::DeviceAddress shaderDataStartAddress;
-    uint32_t shaderDataIndex;
-    uint32_t particlesEnabled;
-    int32_t lightingMode;
 };
 
 export struct Plane {

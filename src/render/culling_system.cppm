@@ -43,7 +43,7 @@ public:
 
             // Get bounding box of the mesh
             BoundingBox boundingBox = meshComponent->getBoundingBox();
-            boundingBox.transform(transformComponent->getTransformMatrix());
+            // boundingBox.transform(transformComponent->getTransformMatrix());
 
             if (frustum.intersects(boundingBox)) {
                 m_VisibleEntities.emplace_back(entity);

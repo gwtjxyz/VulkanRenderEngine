@@ -7,6 +7,8 @@ module;
 #include <vulkan/vulkan_raii.hpp>
 #endif
 
+#include "core/util_macros.h"
+
 export module vulkan_resource_service;
 
 #ifndef DISABLE_IMPORT_STD
@@ -53,11 +55,14 @@ export struct VulkanComputeBufferData {
     vk::DeviceAddress bufferDeviceAddress = 0;
 };
 
+export class VulkanResourceService;
+GENERATE_LOCATOR(VulkanResourceService)
+
 // "Backbone" of the renderer, holds functions related to memory/resource allocation
 // as well as the Vulkan handles related to their use; largely self-contained
 //
 // All handles returned by the public functions of this service will need to be manually freed later on by the caller
-export class VulkanResourceService {
+class VulkanResourceService {
 public:
     VulkanResourceService() {}
 
@@ -142,36 +147,34 @@ public:
         return bufferData;
     }
 
-    std::vector<VulkanShaderBufferData> createShaderBuffers(const vk::DeviceSize bufferSize, const int maxFramesInFlight) const {
-        std::vector<VulkanShaderBufferData> shaderBufferData {};
+    template<typename T>
+    VulkanShaderBufferData createShaderBuffer(const uint32_t objectCount) const {
+        return createShaderBuffer(objectCount * sizeof(T));
+    }
 
-        for (size_t i = 0; i < maxFramesInFlight; ++i) {
-            vk::Buffer buffer;
-            vk::DeviceMemory bufferMemory;
-            createBuffer(
-                bufferSize,
-                vk::BufferUsageFlagBits::eShaderDeviceAddress,
-                vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
-                buffer,
-                bufferMemory
-            );
+    VulkanShaderBufferData createShaderBuffer(const vk::DeviceSize bufferSize) const {
+        vk::Buffer buffer;
+        vk::DeviceMemory bufferMemory;
+        createBuffer(
+            bufferSize,
+            vk::BufferUsageFlagBits::eShaderDeviceAddress,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+            buffer,
+            bufferMemory
+        );
+        void * mappedMemory = m_Instance->getDevice().mapMemory(bufferMemory, 0, bufferSize);
 
-            vk::BufferDeviceAddressInfo deviceAddressInfo = {
-                .buffer = buffer
-            };
-            vk::DeviceAddress bufferDeviceAddress = m_Instance->getDevice().getBufferAddress(deviceAddressInfo);
+        vk::BufferDeviceAddressInfo deviceAddressInfo = {
+            .buffer = buffer
+        };
+        vk::DeviceAddress bufferDeviceAddress = m_Instance->getDevice().getBufferAddress(deviceAddressInfo);
 
-            shaderBufferData.emplace_back(
-                VulkanShaderBufferData {
-                    buffer,
-                    bufferMemory,
-                    m_Instance->getDevice().mapMemory(bufferMemory, 0, bufferSize),
-                    bufferDeviceAddress
-                }
-            );
-        }
-
-        return shaderBufferData;
+        return VulkanShaderBufferData {
+            buffer,
+            bufferMemory,
+            mappedMemory,
+            bufferDeviceAddress
+        };
     }
 
     template <typename T>
@@ -435,6 +438,12 @@ public:
         return m_Instance->getDevice().createImageView(viewInfo);
     }
 
+    void copyBuffer(const vk::Buffer & srcBuffer, const vk::Buffer & dstBuffer, const vk::DeviceSize size) const {
+        auto commandCopyBuffer = beginSingleTimeCommands();
+        commandCopyBuffer.copyBuffer(srcBuffer, dstBuffer, vk::BufferCopy(0, 0, size));
+        endSingleTimeCommands(commandCopyBuffer);
+    }
+
     void setVulkanInstance(VulkanInstance * instance) {
         m_Instance = instance;
     }
@@ -579,12 +588,6 @@ private:
         m_Instance->getGraphicsQueue().waitIdle();
 
         m_Instance->getDevice().freeCommandBuffers(m_Instance->getCommandPool(), 1, &commandBuffer);
-    }
-
-    void copyBuffer(const vk::Buffer & srcBuffer, const vk::Buffer & dstBuffer, const vk::DeviceSize size) const {
-        auto commandCopyBuffer = beginSingleTimeCommands();
-        commandCopyBuffer.copyBuffer(srcBuffer, dstBuffer, vk::BufferCopy(0, 0, size));
-        endSingleTimeCommands(commandCopyBuffer);
     }
 
     // TODO parametrize offset/don't create different buffers for every texture

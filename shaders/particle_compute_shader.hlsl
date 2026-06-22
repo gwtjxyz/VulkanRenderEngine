@@ -1,4 +1,4 @@
-#include "compute_push_constants.hlsl"
+#include "compute_push_constants.hlsli"
 
 struct Particle {
     float4 position;

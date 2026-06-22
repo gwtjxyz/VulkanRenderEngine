@@ -98,9 +98,15 @@ public:
         std::array arguments = {
             // Shader file name for debugging
             absolutePathWstrData,
+            L"-HV", L"202x",                    // Use newest HLSL standard
             L"-H",                              // Process includes
             L"-E", entryPoint,                  // main function (so we can have multiple shader stages per file)
             L"-T", targetProfile,               // Shader model
+#ifdef DEBUG
+            L"-Zi",                             // Enable debug info
+            L"-fspv-debug=vulkan-with-source",  // Additional SPIR-V info
+            // L"-Od",                             // Disable optimizations
+#endif
             L"-spirv"                           // Compile for Vulkan
         };
 

@@ -24,12 +24,15 @@ import std;
 #endif
 
 import camera;
-import ecs;
+import constants;
+import components;
+import entity_system;
+import device_mapper;
 import hlsl_compiler;
-import render_service_locator;
+import pipeline_manager;
+import platform;
 import render_types;
 import resource;
-import platform;
 import vulkan_instance;
 import vulkan_resource_service;
 
@@ -38,14 +41,6 @@ import glm;
 #if !(defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES) || defined(DISABLE_VULKAN_MODULE))
 import vulkan;
 #endif
-
-constexpr uint32_t WIDTH = 1280;
-constexpr uint32_t HEIGHT = 720;
-constexpr uint32_t PARTICLE_COUNT = 8192;
-const std::string VIKING_ROOM_MODEL_NAME = "viking_room";
-const std::string VIKING_ROOM_TEXTURE_NAME = "viking_room";
-const std::string TERRAIN_MODEL_NAME = "terrain";
-const std::string TERRAIN_TEXTURE_NAME = "terrain_diffuse";
 
 #ifdef NDEBUG
 constexpr bool enableValidationLayers = false;
@@ -68,7 +63,7 @@ static void checkVkResult(VkResult err) {
 export class RenderEngine {
 public:
     void run(const std::string & appName) {
-        initService();
+        initServices();
         initWindow(appName);
         initVulkan();
         mainLoop();
@@ -76,9 +71,13 @@ public:
     }
 
 private:
-    void initService() {
+    void initServices() {
         m_VulkanResourceService = std::make_shared<VulkanResourceService>();
-        Locator::provide(m_VulkanResourceService.get());
+        VulkanResourceServiceLocator::provide(m_VulkanResourceService.get());
+        m_PipelineManager = std::make_shared<PipelineManager>();
+        PipelineManagerLocator::provide(m_PipelineManager.get());
+        m_DeviceMapper = std::make_shared<DeviceMapper>();
+        DeviceMapperLocator::provide(m_DeviceMapper.get());
     }
 
     void initWindow(const std::string & appName) {
@@ -175,6 +174,7 @@ private:
         // Init core Vulkan stuff
         m_Instance.initialize(vk::ApiVersion14, enableValidationLayers, m_Window);
         m_VulkanResourceService->setVulkanInstance(&m_Instance);
+        m_PipelineManager->setVulkanInstance(&m_Instance);
 
         // MSAA (TODO: allow this to be adjusted on the fly?)
         m_MsaaSamples = getMaxUsableSampleCount();
@@ -186,8 +186,7 @@ private:
         setupImgui();
 
         // Load assets
-        loadTextures();
-        loadModels();
+        loadEntities();
 
         // Pipeline layout setup
         createDescriptorSetLayout();
@@ -203,7 +202,7 @@ private:
         createComputeCommandBuffers();
 
         // Pipeline draw data
-        createShaderDataBuffers();
+        m_DeviceMapper->preallocateBuffers(100, MAX_FRAMES_IN_FLIGHT);
         createComputeBuffers();
 
         // Image resources to draw into
@@ -300,10 +299,7 @@ private:
         cleanupDepthResources();
         cleanupColorResources();
         m_VulkanResourceService->freeResources(m_TextureSampler);
-
-        for (auto & shaderDataBuffer : m_ShaderDataBuffers) {
-            m_VulkanResourceService->freeResourcesAndUnmapMemory(shaderDataBuffer.buffer, shaderDataBuffer.bufferMemory);
-        }
+        m_DeviceMapper->freeResources();
 
         for (auto & computeDataBuffer : m_ComputeDataBuffers) {
             m_VulkanResourceService->freeResources(computeDataBuffer.buffer, computeDataBuffer.bufferMemory);
@@ -344,7 +340,7 @@ private:
         uint64_t graphicsSignalValue = ++m_TimelineValue;
 
         updateComputePushConstants();
-        updateShaderData();
+        updateEntities();
 
         // Compute
         {
@@ -475,21 +471,24 @@ private:
 
         if (ImGui::CollapsingHeader("Shader Controls")) {
             const char * lightingModeLabel;
-            switch (m_LightingMode) {
-                case 0:
+            switch (m_LightMode) {
+                case LightMode::Off:
                     lightingModeLabel = "Off";
                     break;
-                case 1:
+                case LightMode::Phong:
                     lightingModeLabel = "Phong";
                     break;
-                case 2:
+                case LightMode::Gooch:
                     lightingModeLabel = "Gooch";
                     break;
                 default:
                     lightingModeLabel = "Unknown";
                     break;
             }
-            ImGui::SliderInt("Lighting mode", &m_LightingMode, 0, 2, lightingModeLabel);
+
+            auto lightModeInt = static_cast<int32_t>(m_LightMode);
+            ImGui::SliderInt("Lighting mode", &lightModeInt, 0, 2, lightingModeLabel);
+            m_LightMode = static_cast<LightMode>(lightModeInt);
 
             if (ImGui::BeginTable("ShaderControlCheckboxes", 2)) {
                 ImGui::TableNextColumn();
@@ -502,7 +501,7 @@ private:
             static float lightPosWidgetData[3] {
                 m_LightPosition.x, m_LightPosition.y, m_LightPosition.z
             };
-            if (m_LightingMode == 0) {
+            if (m_LightMode == LightMode::Off) {
                 ImGui::BeginDisabled();
             }
 
@@ -511,7 +510,7 @@ private:
             m_LightPosition.y = lightPosWidgetData[1];
             m_LightPosition.z = lightPosWidgetData[2];
 
-            if (m_LightingMode == 0) {
+            if (m_LightMode == LightMode::Off) {
                 ImGui::EndDisabled();
             }
         }
@@ -527,43 +526,19 @@ private:
         startTime = currentTime;
     }
 
-    void updateShaderData() const {
+    void updateEntities() {
         static auto startTime = std::chrono::high_resolution_clock::now();
 
         auto currentTime = std::chrono::high_resolution_clock::now();
         float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
-        ShaderData shaderData[2] {};
-        static glm::mat4 vikingRoomModel = glm::rotate(
-            glm::translate(
-                glm::mat4(1.0f),
-                glm::vec3(0.0f, -0.5f, -2.0f)
-            ),
-            glm::radians(-90.0f),
-            glm::vec3(1.0f, 0.0f, 0.0f)
-        );
-
         if (m_IsModelSpinEnabled) {
-            vikingRoomModel = glm::rotate(vikingRoomModel, time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+            m_EntitySystem.rotate(VIKING_ROOM_ENTITY_NAME, 0, time * 90.0f, 0.0f);
         }
 
-        // Viking room
-        shaderData[0].model = vikingRoomModel;
-        shaderData[0].view = m_Camera.getViewMatrix();
-        shaderData[0].projection = m_Camera.getProjectionMatrix();
-        shaderData[0].projection[1][1] *= -1; // Vulkan's Y coordinate is inverted compared to OpenGL's, which glm was designed for originally
-        shaderData[0].lightPos = m_LightPosition;
-        shaderData[0].textureIndex = 0;
-
-        // Terrain
-        shaderData[1].model = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-20.0f, -15.0f, 30.0f)), glm::vec3(0.2f, 0.2f, 0.2f));
-        shaderData[1].view = m_Camera.getViewMatrix();
-        shaderData[1].projection = m_Camera.getProjectionMatrix();
-        shaderData[1].projection[1][1] *= -1;
-        shaderData[1].lightPos = m_LightPosition;
-        shaderData[1].textureIndex = 1;
-
-        memcpy(m_ShaderDataBuffers[m_FrameIndex].mappedMemory, &shaderData, sizeof(shaderData));
+        if (m_LightMode != LightMode::Off) {
+            m_EntitySystem.setPosition(LIGHT_ENTITY_NAME, m_LightPosition);
+        }
         startTime = currentTime;
     }
 
@@ -627,13 +602,17 @@ private:
         m_SwapChainImages = m_SwapChain.getImages();
 
         assert(m_SwapChainImageViews.empty());
+        // vk::ImageAspectFlags swapchainFlags = vk::ImageAspectFlagBits::eColor;
+
         for (auto & image : m_SwapChainImages) {
-            m_SwapChainImageViews.emplace_back(m_VulkanResourceService->createImageView(
-                image,
-                m_SwapChainSurfaceFormat.format,
-                vk::ImageAspectFlagBits::eColor,
-                1
-            ));
+            m_SwapChainImageViews.emplace_back(
+                m_VulkanResourceService->createImageView(
+                    image,
+                    m_SwapChainSurfaceFormat.format,
+                    vk::ImageAspectFlagBits::eColor,
+                    1
+                )
+            );
         }
 
         // Set aspect ratio for camera
@@ -798,6 +777,15 @@ private:
         };
 
         m_ComputePipeline = m_Instance.getRaiiDevice().createComputePipeline(nullptr, pipelineCreateInfo);
+
+        // TODO cleanup
+        m_PipelineManager->registerPipeline(COMPUTE_PIPELINE_NAME);
+        m_PipelineManager->setInfoForPipeline(
+            COMPUTE_PIPELINE_NAME,
+            m_ComputePipeline,
+            m_ComputePipelineLayout,
+            vk::PipelineBindPoint::eCompute
+        );
     }
 
     void createGraphicsPipeline() {
@@ -873,7 +861,7 @@ private:
 
         vk::PushConstantRange pushConstantRange = {
             .stageFlags = vk::ShaderStageFlagBits::eVertex,
-            .size = sizeof(VertexPushConstants)
+            .size = PipelineManager::getVertexPushConstantsSize()
         };
 
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo {
@@ -907,6 +895,21 @@ private:
         };
 
         m_GraphicsPipeline = vk::raii::Pipeline(m_Instance.getRaiiDevice(), nullptr, pipelineInfo);
+
+        // TODO clean up
+        m_PipelineManager->registerPipeline(GRAPHICS_PIPELINE_NAME);
+        m_PipelineManager->setInfoForPipeline(
+            GRAPHICS_PIPELINE_NAME,
+            m_GraphicsPipeline,
+            m_GraphicsPipelineLayout,
+            vk::PipelineBindPoint::eGraphics
+        );
+        m_PipelineManager->setDescriptorInfoForPipeline(
+            GRAPHICS_PIPELINE_NAME,
+            m_DescriptorPool,
+            m_TextureDescriptorSetLayout,
+            m_TextureDescriptorSet
+        );
     }
 
     void createPointGraphicsPipeline() {
@@ -988,7 +991,7 @@ private:
 
         vk::PushConstantRange pushConstantRange = {
             .stageFlags = vk::ShaderStageFlagBits::eVertex,
-            .size = sizeof(VertexPushConstants)
+            .size = PipelineManager::getVertexPushConstantsSize()
         };
 
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo {
@@ -1023,6 +1026,16 @@ private:
         };
 
         m_PointGraphicsPipeline = vk::raii::Pipeline(m_Instance.getRaiiDevice(), nullptr, pipelineInfo);
+
+        // TODO cleanup
+        m_PipelineManager->registerPipeline(POINT_GRAPHICS_PIPELINE_NAME);
+        m_PipelineManager->setInfoForPipeline(
+            POINT_GRAPHICS_PIPELINE_NAME,
+            m_PointGraphicsPipeline,
+            m_PointGraphicsPipelineLayout,
+            vk::PipelineBindPoint::eGraphics
+        );
+
     }
 
     void createColorResources() {
@@ -1044,24 +1057,8 @@ private:
         m_DepthImageView = depthResources.imageView;
     }
 
-    void loadTextures() {
-        auto vikingRoomTextureHandle = m_ResourceManager.load<Texture>(VIKING_ROOM_TEXTURE_NAME);
-        auto terrainTextureHandle = m_ResourceManager.load<Texture>(TERRAIN_TEXTURE_NAME);
-    }
-
-    void loadModels() {
-        auto vikingRoomModelHandle = m_ResourceManager.load<Mesh>(VIKING_ROOM_MODEL_NAME);
-        auto terrainModelhandle = m_ResourceManager.load<Mesh>(TERRAIN_MODEL_NAME);
-    }
-
-    void createShaderDataBuffers() {
-        // Count should be equal to number of objects drawn
-        // Currently we have 1 object per mesh so this works
-        // FIXME change in the future because this will break with more models!
-        uint32_t shaderDataObjectCount = m_ResourceManager.getResourceTypeCount<Mesh>();
-        m_ShaderDataBuffers = m_VulkanResourceService->createShaderBuffers(
-            sizeof(ShaderData) * shaderDataObjectCount, MAX_FRAMES_IN_FLIGHT
-        );
+    void loadEntities() {
+        m_EntitySystem.setupWorld(m_ResourceManager);
     }
 
     void createComputeBuffers() {
@@ -1142,6 +1139,7 @@ private:
                 .imageView = textures[i]->getImageView(),
                 .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
             };
+            textures[i]->setIndex(i);
 
             textureDescriptors.push_back(imageInfo);
         }
@@ -1195,6 +1193,8 @@ private:
         auto & commandBuffer = m_CommandBuffers[m_FrameIndex];
         commandBuffer.reset();
         commandBuffer.begin({});
+
+        m_PipelineManager->setActiveCommandBuffer(commandBuffer);
 
         // Before starting rendering, transition the swapchain image to COLOR_ATTACHMENT_OPTIMAL
         m_VulkanResourceService->transitionImageLayout(
@@ -1268,69 +1268,26 @@ private:
 
         commandBuffer.beginRendering(renderingInfo);
 
-        VertexPushConstants vertexPushConstants = {
-            .shaderDataStartAddress = m_ComputeDataBuffers[m_FrameIndex].bufferDeviceAddress,
-            .shaderDataIndex = 0,
-            .particlesEnabled = m_ParticlesEnabled,
-            .lightingMode = m_LightingMode,
-        };
+        // Set camera's projection matrix for rendering
+        m_PipelineManager->setProjectionView(m_Camera.getProjectionMatrix(), m_Camera.getViewMatrix());
+        // Set buffer device addresses
+        m_PipelineManager->prepareAddressesForFrame(m_FrameIndex);
+        m_PipelineManager->setParticlesEnabled(m_ParticlesEnabled);
 
         // Draw particles
-        commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_PointGraphicsPipeline);
-        commandBuffer.bindVertexBuffers(0, m_ComputeDataBuffers[m_FrameIndex].buffer, { 0 });
-        commandBuffer.pushConstants(
-            m_PointGraphicsPipelineLayout,
-            vk::ShaderStageFlagBits::eVertex,
-            0,
-            sizeof(VertexPushConstants),
-            &vertexPushConstants
-        );
+        m_PipelineManager->setAndBindActivePipeline(POINT_GRAPHICS_PIPELINE_NAME);
+        m_PipelineManager->bindVertices(m_ComputeDataBuffers[m_FrameIndex].buffer);
+        m_PipelineManager->bindVertexPushConstants();
+        // TODO extract into pipeline manager?
         commandBuffer.draw(PARTICLE_COUNT, 1, 0, 0);
 
         // Common model rendering bindings
-        commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *m_GraphicsPipeline);
-        commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_GraphicsPipelineLayout, 0, *m_TextureDescriptorSet, nullptr);
+        m_PipelineManager->setAndBindActivePipeline(GRAPHICS_PIPELINE_NAME);
+        m_PipelineManager->setLightMode(m_LightMode);
+        m_PipelineManager->setLightCount(m_DeviceMapper->getLightCount());
 
-        commandBuffer.pushConstants(
-            m_GraphicsPipelineLayout,
-            vk::ShaderStageFlagBits::eVertex,
-            0,
-            sizeof(VertexPushConstants),
-            &vertexPushConstants
-        );
-
-        // Draw viking room mesh
-        const auto vikingRoomMesh = m_ResourceManager.getResource<Mesh>(VIKING_ROOM_MODEL_NAME);
-
-        commandBuffer.bindVertexBuffers(0, vikingRoomMesh->getVertexBuffer(), { 0 });
-        commandBuffer.bindIndexBuffer(vikingRoomMesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
-
-        vertexPushConstants.shaderDataStartAddress = m_ShaderDataBuffers[m_FrameIndex].bufferDeviceAddress;
-        commandBuffer.pushConstants(
-            m_GraphicsPipelineLayout,
-            vk::ShaderStageFlagBits::eVertex,
-            0,
-            sizeof(VertexPushConstants),
-            &vertexPushConstants
-        );
-
-        commandBuffer.drawIndexed(vikingRoomMesh->getIndexCount(), 1, 0, 0, 0);
-
-        // Draw terrain mesh
-        const auto terrainMesh = m_ResourceManager.getResource<Mesh>(TERRAIN_MODEL_NAME);
-        commandBuffer.bindVertexBuffers(0, terrainMesh->getVertexBuffer(), { 0 });
-        commandBuffer.bindIndexBuffer(terrainMesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
-        vertexPushConstants.shaderDataIndex = 1;
-
-        commandBuffer.pushConstants(
-            m_GraphicsPipelineLayout,
-            vk::ShaderStageFlagBits::eVertex,
-            0,
-            sizeof(VertexPushConstants),
-            &vertexPushConstants
-        );
-
-        commandBuffer.drawIndexed(terrainMesh->getIndexCount(), 1, 0, 0, 0);
+        // Draw entities
+        m_EntitySystem.prepareAndRender(m_FrameIndex);
 
         // Draw ImGui
         ImGui::Render();
@@ -1410,6 +1367,8 @@ private:
             glfwWaitEvents();
         }
 
+        m_PipelineManager->clearAll();
+
         m_Instance.getDevice().waitIdle();
 
         cleanupSwapChain();
@@ -1435,8 +1394,11 @@ private:
 
 private:
     std::shared_ptr<VulkanResourceService> m_VulkanResourceService = nullptr;
+    std::shared_ptr<DeviceMapper> m_DeviceMapper = nullptr;
+    std::shared_ptr<PipelineManager> m_PipelineManager = nullptr;
     ResourceManager m_ResourceManager {};
     HlslShaderCompiler m_ShaderCompiler {};
+    EntitySystem m_EntitySystem {};
 
     Camera m_Camera {};
 
@@ -1445,7 +1407,7 @@ private:
     uint32_t m_Fps = 0;
 
     // Dynamic shader data
-    int32_t m_LightingMode = true;
+    LightMode m_LightMode = LightMode::Phong;
     bool m_ParticlesEnabled = true;
     glm::vec4 m_LightPosition = { 0.0f, -10.0f, 10.0f, 0.0f };
 
@@ -1491,7 +1453,6 @@ private:
     // here because it would be slightly overkill for drawing just a couple simple shapes.
     // We'll optimize this once there's an actual need/reason to do so.
 
-    std::vector<VulkanShaderBufferData> m_ShaderDataBuffers {};
     std::vector<VulkanComputeBufferData> m_ComputeDataBuffers {};
     ComputePushConstants m_ComputePushConstants {};
 
