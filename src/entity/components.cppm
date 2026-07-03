@@ -42,8 +42,8 @@ export struct CTransform {
 };
 
 export struct CMesh {
-    Mesh * mesh = nullptr;                // contains vertex/index buffer info
-    Material * material = nullptr;        // contains material index
+    Asset3D * mesh = nullptr;       // contains vertex/index buffer info
+    Material * material = nullptr;  // contains material index
     bool outOfDate = true;
 };
 

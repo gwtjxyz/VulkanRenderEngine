@@ -21,7 +21,6 @@ export module device_mapper;
 import std;
 #endif
 
-
 import glm;
 #if !(defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES) || defined(DISABLE_VULKAN_MODULE))
 import vulkan;
@@ -92,13 +91,13 @@ struct DataBuffer {
     Layout layout {};
 };
 
-struct TransformDataBuffer : DataBuffer<TransformLayout> {};
+using TransformDataBuffer = DataBuffer<TransformLayout>;
 
-struct MaterialDataBuffer : DataBuffer<MaterialLayout> {};
+using MaterialDataBuffer = DataBuffer<MaterialLayout>;
 
-struct DrawDataBuffer : DataBuffer<DrawLayout> {};
+using DrawDataBuffer = DataBuffer<DrawLayout>;
 
-struct LightDataBuffer : DataBuffer<LightLayout> {};
+using LightDataBuffer = DataBuffer<LightLayout>;
 
 struct AddressMappings {
     vk::DeviceAddress drawAddress, lightAddress, transformAddress, materialAddress;

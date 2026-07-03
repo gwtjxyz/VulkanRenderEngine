@@ -23,6 +23,12 @@ import std;
 
 const std::string PROJECT_DIR = "VulkanHppTutorial"; // TODO un-hardcode?
 
+export struct FileInfo {
+    std::string name;
+    std::string extension;
+    std::filesystem::path absolutePath;
+};
+
 export std::filesystem::path pathFromProjectDir(const std::string & relativePath) {
     auto currentPath = std::filesystem::current_path();
     while (currentPath.filename() != std::filesystem::path(PROJECT_DIR)) {
@@ -34,42 +40,12 @@ export std::filesystem::path pathFromProjectDir(const std::string & relativePath
     return combinedPath;
 }
 
-// TODO cleanup this code/swap over to using Slang's compilation API
-export void compileShader(const std::string & shaderPathFromProjectFolder, const std::string & outputPathFromProjectFolder) {
-#if defined(_WIN32)
-    STARTUPINFO si {};
-    si.cb = sizeof(si);
-    PROCESS_INFORMATION pi {};
-    auto shaderPath = pathFromProjectDir(shaderPathFromProjectFolder);
-    auto outputPath = pathFromProjectDir(outputPathFromProjectFolder);
-    auto compilerPath = pathFromProjectDir("external/slangc.exe");
-    // TODO parametrize this somehow?
-    auto arguments = compilerPath.string().append(
-        " " + shaderPath.string() +
-        " -target spirv -profile spirv_1_4 -emit-spirv-directly"
-        " -fvk-use-entrypoint-name -entry vertMain -entry fragMain"
-        " -o " + outputPath.string());
+export FileInfo getFileInfo(const std::string & relativePath) {
+    auto absolutePath = pathFromProjectDir(relativePath);
+    auto extension = absolutePath.extension().string();
+    auto name = absolutePath.stem().string();
 
-    if (CreateProcessA(
-        compilerPath.string().c_str(),
-        arguments.data(),
-        nullptr,
-        nullptr,
-        FALSE,
-        0,
-        nullptr,
-        nullptr,
-        &si,
-        &pi
-    )) {
-        WaitForSingleObject(pi.hProcess, INFINITE);
-    }
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-#else
-    // TODO other platforms support
-    throw std::runtime_error("recompileShader function not defined for this platform!");
-#endif
+    return { name, extension, absolutePath };
 }
 
 export std::vector<char> readFile(const std::string & filename) {
@@ -90,18 +66,8 @@ export std::vector<char> readFile(const std::string & filename) {
 
 export class StbImageWrapper {
 public:
-    explicit StbImageWrapper(const std::string & pathToTexture) {
-#if defined(_WIN32)
-        // Windows uses UTF-16, so I'm pretty sure we need to use wstring here
-        auto absolutePath = pathFromProjectDir(pathToTexture).wstring();
-        char utf8PathBuffer[256] = {}; // TODO use something more safe?
-        stbi_convert_wchar_to_utf8(utf8PathBuffer, absolutePath.size() + 1, absolutePath.c_str());
-        pixels = stbi_load(utf8PathBuffer, &width, &height, &channels, STBI_rgb_alpha);
-#else
-        // Everything else uses UTF-8 so a normal string/cstring should work just fine
-        auto absolutePath = pathFromProjectDir(pathToTexture);
-        pixels = stbi_load(absolutePath.c_str(), &width, &height, &channels, STBI_rgb_alpha);
-#endif
+    explicit StbImageWrapper(FileInfo & fileInfo) {
+        load(fileInfo.absolutePath, fileInfo.extension);
     }
 
     ~StbImageWrapper() {
@@ -118,9 +84,32 @@ public:
     // explicitly delete copy assignment operator and move assignment operator
     StbImageWrapper & operator=(const StbImageWrapper & other) = delete;
     StbImageWrapper & operator=(StbImageWrapper && other) = delete;
+
+private:
+    void load(const std::filesystem::path & absolutePath, const std::string & extension) {
+        // Will expand this logic as necessary, for now just png and jpeg is enough
+        int desiredChannels;
+        if (extension == ".jpg" || extension == ".jpeg")
+            desiredChannels = STBI_rgb;
+        else
+            desiredChannels = STBI_rgb_alpha;     // PNG
+
+#if defined(_WIN32)
+        // Windows uses UTF-16, so I'm pretty sure we need to use wstring here
+        auto absolutePathString = absolutePath.wstring();
+        char utf8PathBuffer[256] = {}; // TODO use something more safe?
+        stbi_convert_wchar_to_utf8(utf8PathBuffer, absolutePathString.size() + 1, absolutePathString.c_str());
+
+        pixels = stbi_load(utf8PathBuffer, &width, &height, &channels, desiredChannels);
+#else
+        // Everything else uses UTF-8 so a normal string/cstring should work just fine
+        pixels = stbi_load(absolutePath.c_str(), &width, &height, &channels, desiredChannels);
+#endif
+    }
+
 public:
-    int width{};
-    int height{};
-    int channels{};
-    unsigned char * pixels{};
+    int width {};
+    int height {};
+    int channels {};
+    unsigned char * pixels {};
 };

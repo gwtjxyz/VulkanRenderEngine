@@ -114,7 +114,7 @@ public:
     }
 
     template <typename T>
-    VulkanBufferData createVulkanBuffer(vk::DeviceSize bufferSize, vk::BufferUsageFlagBits bufferTypeFlags, std::vector<T> & data) {
+    VulkanBufferData createVulkanBuffer(vk::DeviceSize bufferSize, vk::BufferUsageFlags bufferTypeFlags, const T * data) {
         VulkanBufferData bufferData {};
 
         vk::Buffer stagingBuffer {};
@@ -129,7 +129,7 @@ public:
         );
 
         void * stagingData = m_Instance->getDevice().mapMemory(stagingBufferMemory, 0, bufferSize);
-        memcpy(stagingData, data.data(), bufferSize);
+        memcpy(stagingData, data, bufferSize);
         m_Instance->getDevice().unmapMemory(stagingBufferMemory);
 
         createBuffer(
@@ -316,6 +316,10 @@ public:
     void freeResources(vk::ImageView & imageView) const {
         m_Instance->getDevice().destroyImageView(imageView);
         imageView = nullptr;
+    }
+
+    void freeResources(VulkanBufferData bufferData) const {
+        freeResources(bufferData.buffer, bufferData.bufferMemory);
     }
 
     void freeResources(vk::Buffer & buffer, vk::DeviceMemory & bufferMemory) const {

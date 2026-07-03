@@ -7,6 +7,7 @@ module;
 #endif
 
 #ifdef DISABLE_IMPORT_STD
+#include <filesystem>
 #include <memory>
 #include <print>
 #include <typeindex>
@@ -21,11 +22,12 @@ export module resource;
 import std;
 #endif
 
-import platform;
 import device_mapper;
+import model_parser;
+import platform;
 import pipeline_manager;
-import vulkan_resource_service;
 import render_types;
+import vulkan_resource_service;
 
 import glm;
 import tinyobjloader;
@@ -36,8 +38,12 @@ import vulkan;
 // Resource base class
 export class Resource {
 public:
-    explicit Resource(const std::string & id) : m_ResourceId(id) {}
+    explicit Resource() {}
     virtual ~Resource() = default;
+    Resource(const Resource &) = delete;
+    Resource(const Resource &&) = delete;
+    Resource & operator=(const Resource &) = delete;
+    Resource & operator=(const Resource &&) = delete;
 
     // Core resource identity and state access methods
     [[nodiscard]] const std::string & getId() const {
@@ -63,8 +69,8 @@ protected:
     virtual bool doLoad() = 0;
     virtual void doUnload() = 0;
 
-private:
     std::string m_ResourceId;       // Unique identifier for this resource within the system
+private:
     bool m_Loaded = false;          // Loading state flag for resource lifecycle management
 };
 
@@ -78,36 +84,35 @@ public:
     ResourceManager() = default;
 
     template <typename T>
-    ResourceHandle<T> load(const std::string & resourceId) {
+    ResourceHandle<T> load(const std::string & resourceNameOrPath) {
         static_assert(std::is_base_of<Resource, T>::value, "T must derive from Resource");
 
         // Check existing resource cache to avoid redundant loading
         auto type = std::type_index(typeid(T));
         auto & typeResources = m_Resources[type];
-        auto it = typeResources.find(resourceId);
+        auto it = typeResources.find(resourceNameOrPath);
 
         if (it != typeResources.end()) {
             // Resource exists in cache - increment reference count and return handle
-            auto it2 = m_RefCounts.find(resourceId);
+            auto it2 = m_RefCounts.find(resourceNameOrPath);
             auto oldRefCount = it2->second;
             it2->second++;
 
-            // TODO remove this assertion
             assert(it2->second > oldRefCount);
         }
 
         // Resource not found - create new resource instance and attempt loading
-        std::shared_ptr<T> resource = std::make_shared<T>(resourceId);
+        std::shared_ptr<T> resource = std::make_shared<T>(resourceNameOrPath);
         if (!resource->load()) {
             // Loading failed - return invalid handle rather than corrupting cache
             return ResourceHandle<T>();
         }
 
         // Cache successful resource and initialize reference tracking
-        typeResources[resourceId] = resource;
-        m_RefCounts[resourceId] = 1;
+        typeResources[resourceNameOrPath] = resource;
+        m_RefCounts[resourceNameOrPath] = 1;
 
-        return ResourceHandle<T>(resourceId, this);
+        return ResourceHandle<T>(resource->getId(), this);
     }
 
     template <typename T>
@@ -225,9 +230,11 @@ private:
 // Texture resource
 export class Texture : public Resource {
 public:
-    explicit Texture(const std::string & id) : Resource(id) {}
+    explicit Texture(const std::string & path) {
+        m_FileInfo = getFileInfo(path);
+        m_ResourceId = m_FileInfo.name;
+    }
 
-    // TODO rule of 5
     ~Texture() override {
         unload();
     }
@@ -255,16 +262,14 @@ public:
 
 protected:
     bool doLoad() override {
-        const std::string filePath = "assets/" + getId() + ".png";
-
-        StbImageWrapper data = loadImageData(filePath);
+        // Should work for both PNGs and JPEGs, will expand as necessary
+        StbImageWrapper data = loadImageData();
         if (!data.pixels) {
             return false;
         }
 
         createVulkanImage(data);
 
-        // StbImageWrapper's data will be freed automatically upon the object going out of scope
         return true;
     }
 
@@ -276,9 +281,9 @@ protected:
     }
 
 private:
-    StbImageWrapper loadImageData(const std::string & filePath) {
-        // TODO expand for other formats like KTX, currently will probably only work with more traditional image formats
-        auto imageData = StbImageWrapper(filePath);
+    StbImageWrapper loadImageData() {
+        // TODO expand for other formats like KTX, currently will only work with more traditional image formats
+        auto imageData = StbImageWrapper(m_FileInfo);
 
         m_Width = imageData.width;
         m_Height = imageData.height;
@@ -312,14 +317,20 @@ private:
     // Problem - can only bind texture to one pipeline at once
     // but that doesn't really matter for now (can extract elsewhere later)
     uint32_t m_Index = INDEX_UNSET;
+
+    FileInfo m_FileInfo;
 };
 
-export class Mesh : public Resource {
+// A 3D asset which can either hold a singular simple mesh or a more complex scene graph structure
+export class Asset3D : public Resource {
 public:
-    explicit Mesh(const std::string & id) : Resource(id) {}
+    explicit Asset3D(const std::string & path) {
+        m_FileInfo = getFileInfo(path);
+        m_ResourceId = m_FileInfo.name;
+    }
 
     // TODO rule of 5
-    ~Mesh() override {
+    ~Asset3D() override {
         unload();
     }
 
@@ -338,15 +349,15 @@ public:
     [[nodiscard]] uint32_t getIndexCount() const {
         return m_IndexCount;
     }
+
 protected:
     bool doLoad() override {
         // TODO support more formats (like glTF)
-        const std::string filePath = "assets/" + getId() + ".obj";
 
         // Temp storage for vertices and indices
         std::vector<Vertex> vertices;
         std::vector<uint32_t> indices;
-        if (!loadMeshData(filePath, vertices, indices)) {
+        if (!loadMeshData(vertices, indices)) {
             return false;   // Failed to parse - abort loading
         }
 
@@ -370,17 +381,28 @@ protected:
     }
 
 private:
-    static bool loadMeshData(const std::string & filePath, std::vector<Vertex> & vertices, std::vector<uint32_t> & indices) {
-        // TODO switch to tinygltf
+    bool loadMeshData(std::vector<Vertex> & vertices, std::vector<uint32_t> & indices) {
+        if (m_FileInfo.extension == ".obj") {
+            return loadObj(vertices, indices);
+        } else if (m_FileInfo.extension == ".gltf") {
+            return loadGltf(vertices, indices);
+        } else {
+            // Unsupported format
+            return false;
+        }
+    }
+
+    bool loadObj(std::vector<Vertex> & vertices, std::vector<uint32_t> & indices) {
         tinyobj::attrib_t attrib;
         std::vector<tinyobj::shape_t> shapes;
+        // TODO support loading materials
         std::vector<tinyobj::material_t> materials;
         std::string warn, err;
         std::unordered_map<Vertex, uint32_t> uniqueVertices {};
 
         // TODO wchar support?
-        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, pathFromProjectDir(filePath).string().c_str())) {
-            std::print("Error loading model from path {}: {} {}", pathFromProjectDir(filePath).string(), warn, err);
+        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, m_FileInfo.absolutePath.string().c_str())) {
+            std::println("Error loading OBJ model from path {}: {} {}", m_FileInfo.absolutePath.string(), warn, err);
             return false;
         }
 
@@ -390,8 +412,7 @@ private:
                 vertex.pos = {
                     attrib.vertices[3 * index.vertex_index + 0],
                     attrib.vertices[3 * index.vertex_index + 1],
-                    attrib.vertices[3 * index.vertex_index + 2],
-                    1
+                    attrib.vertices[3 * index.vertex_index + 2]
                 };
 
                 // OBJ assumes 0 = bottom of the image, but Vulkan works with 0 = top of the image, so we flip y coord
@@ -402,8 +423,7 @@ private:
                 vertex.normal = {
                     attrib.normals[3 * index.normal_index],
                     attrib.normals[3 * index.normal_index + 1],
-                    attrib.normals[3 * index.normal_index + 2],
-                    0
+                    attrib.normals[3 * index.normal_index + 2]
                 };
 
                 if (!uniqueVertices.contains(vertex)) {
@@ -418,12 +438,16 @@ private:
         return true;
     }
 
+    bool loadGltf(std::vector<Vertex> & vertices, std::vector<uint32_t> & indices) {
+        return false;
+    }
+
     void createVertexBuffer(std::vector<Vertex> & vertices) {
         // TODO look into using memory barriers
         auto [buffer, bufferMemory] = VulkanResourceServiceLocator::locate()->createVulkanBuffer(
             sizeof(vertices[0]) * vertices.size(),
             vk::BufferUsageFlagBits::eVertexBuffer,
-            vertices
+            vertices.data()
         );
 
         m_VertexBuffer = buffer;
@@ -435,7 +459,7 @@ private:
         auto [buffer, bufferMemory] = VulkanResourceServiceLocator::locate()->createVulkanBuffer(
             sizeof(indices[0]) * indices.size(),
             vk::BufferUsageFlagBits::eIndexBuffer,
-            indices
+            indices.data()
         );
 
         m_IndexBuffer = buffer;
@@ -443,6 +467,12 @@ private:
     }
 
 private:
+    std::string m_Extension;
+
+    // If the asset is a simple mesh, it manages its own memory; otherwise, the underlying scene structure does it
+    bool m_SimpleMesh = true;
+    SceneGraphAsset * m_SceneGraph = nullptr;
+
     // Vertex data management - stores per-vertex attributes like position, normal, uv coords
     vk::Buffer m_VertexBuffer = nullptr;                    // GPU buffer containing vertex attribute data
     vk::DeviceMemory m_VertexBufferMemory = nullptr;        // GPU memory backing the vertex buffer
@@ -454,12 +484,16 @@ private:
     vk::DeviceMemory m_IndexBufferMemory = nullptr;         // GPU memory backing the index buffer
     vk::DeviceSize m_IndexBufferOffset = 0;                 // Offset within the memory allocation for index buffer
     uint32_t m_IndexCount = 0;                              // Number of indices in this mesh (typically 3 per triangle)
+
+    FileInfo m_FileInfo;
 };
 
 export class Material : public Resource {
 public:
     explicit Material(const std::string & id, const glm::vec4 & materialTint = glm::vec4(1.0f))
-        : Resource(id), m_MaterialTint(materialTint) {}
+        : m_MaterialTint(materialTint) {
+        m_ResourceId = id;
+    }
 
     // TODO rule of 5
     ~Material() override {

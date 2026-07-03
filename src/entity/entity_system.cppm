@@ -42,9 +42,9 @@ public:
         t1.rotateX(-90.0f);
 
         auto & m1 = room.get_mut<CMesh>();
-        auto textureHandle = resourceManager.load<Texture>(VIKING_ROOM_TEXTURE_NAME);
+        auto textureHandle = resourceManager.load<Texture>("assets/" + VIKING_ROOM_TEXTURE_NAME + ".png");
         auto materialHandle = resourceManager.load<Material>(VIKING_ROOM_MATERIAL_NAME);
-        auto meshHandle = resourceManager.load<Mesh>(VIKING_ROOM_MODEL_NAME);
+        auto meshHandle = resourceManager.load<Asset3D>("assets/" + VIKING_ROOM_MODEL_NAME + ".obj");
         materialHandle.get()->setTexture(textureHandle.get());
         m1.material = materialHandle.get();
         m1.mesh = meshHandle.get();
@@ -55,9 +55,9 @@ public:
         t2.scale = glm::vec3(0.2f);
 
         auto & m2 = terrain.get_mut<CMesh>();
-        textureHandle = resourceManager.load<Texture>(TERRAIN_TEXTURE_NAME);
+        textureHandle = resourceManager.load<Texture>("assets/" + TERRAIN_TEXTURE_NAME + ".png");
         materialHandle = resourceManager.load<Material>(TERRAIN_MATERIAL_NAME);
-        meshHandle = resourceManager.load<Mesh>(TERRAIN_MODEL_NAME);
+        meshHandle = resourceManager.load<Asset3D>("assets/" + TERRAIN_MODEL_NAME + ".obj");
         materialHandle.get()->setTexture(textureHandle.get());
         m2.material = materialHandle.get();
         m2.mesh = meshHandle.get();
@@ -71,21 +71,6 @@ public:
 
     void prepareAndRender(uint32_t frameIndex) {
         auto * deviceMapper = DeviceMapperLocator::locate();
-
-        // debug info
-        // auto e1 = m_World.lookup(VIKING_ROOM_ENTITY_NAME.c_str());
-        // auto e2 = m_World.lookup(TERRAIN_ENTITY_NAME.c_str());
-        // auto e3 = m_World.lookup(LIGHT_ENTITY_NAME.c_str());
-
-
-        // auto q = m_World.query<CTransform>();
-        // q.each(
-        //     [](flecs::entity e, CTransform & t) {
-        //         std::cout << e.name() << ": "
-        //             // << t-> << ", " << p.y
-        //             << std::endl;
-        //     }
-        // );
 
         m_LightPrepareSystem.run();
         m_ObjectPrepareSystem.run();
@@ -151,8 +136,6 @@ private:
     void prepareObjectSystem() {
         m_ObjectPrepareSystem = m_World.system<CDraw, CTransform, CMesh>().each(
             [this](flecs::iter & it, size_t row, CDraw & d, CTransform & t, CMesh & m) {
-                // TOOD remove - for debugging
-                auto name = it.entity(row).name().c_str();
                 auto * deviceMapper = DeviceMapperLocator::locate();
                 // Set up indices if they were unset before
                 if (d.index == INDEX_UNSET) {
@@ -180,11 +163,6 @@ private:
 
                 // If material is out of date, update draw buffer with it
                 if (m.material->update() || m.outOfDate) {
-                    // TODO: this is basically duplicated code from Material::update(), do we need this here?
-                    auto * materialPtr = deviceMapper->getMaterial(materialIndex);
-                    materialPtr->layout.materialTint = m.material->getMaterialTint();
-                    materialPtr->layout.textureIndex = m.material->getTexture() ? m.material->getTexture()->getIndex() : INDEX_UNSET;
-
                     drawPtr->layout.materialIndex = materialIndex;
                     m.outOfDate = false;
                 }
@@ -195,8 +173,6 @@ private:
     void prepareRenderSystem() {
         m_RenderSystem = m_World.system<CDraw, CTransform, CMesh>().each(
             [](flecs::iter & it, size_t row, CDraw & d, CTransform & t, CMesh & m) {
-                // TODO remove - for debugging
-                auto name = it.entity(row).name().c_str();
                 auto * pipelineManager = PipelineManagerLocator::locate();
                 // Don't draw if data is incomplete
                 bool drawOffOrIncomplete = d.enabled == false || d.index == INDEX_UNSET;

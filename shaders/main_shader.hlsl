@@ -4,8 +4,8 @@
 #pragma pack_matrix( row_major )
 
 struct VSInput {
-    float4 inPosition: POSITION0;
-    float4 inNormal: NORMAL0;
+    float3 inPosition: POSITION0;
+    float3 inNormal: NORMAL0;
     float2 inUV: TEXCOORD0;
 };
 
@@ -79,20 +79,19 @@ float4x4 quatToRotMat(float4 q) {
 }
 
 float4x4 scaleMat(float4x4 mat, float4 v) {
-    float4x4 result;
-    // TODO double-check this math - not sure why it works atm
-    result[0] = mat[0] * v[0];
-    result[1] = mat[1] * v[1];
-    result[2] = mat[2] * v[2];
-    result[3] = mat[3];
+    float4x4 result = mat;
+    result[0][0] *= v.x;
+    result[1][1] *= v.y;
+    result[2][2] *= v.z;
+
     return result;
 }
 
 // Pretend transform is stored as 3 float4 vectors
-float4x4 buildModelMatrix(float4 position, float4 rotation, float4 s) {
+float4x4 buildModelMatrix(float4 position, float4 rotation, float4 scale) {
     float4x4 T = transMat(identity(), position);
     float4x4 R = quatToRotMat(rotation);
-    float4x4 S = scaleMat(identity(), s);
+    float4x4 S = scaleMat(identity(), scale);
 
     return mul(T, mul(R, S));
 }
@@ -102,8 +101,8 @@ struct VSOutput {
     float4 pos : SV_POSITION;
     float4 normal : NORMAL0;
     float2 UV: TEXCOORD0;
-    float4 fragPos : FRAGPOS;
-    int lightMode : LIGHTMODE;
+    float4 fragPos : FRAG_POS;
+    int lightMode : LIGHT_MODE;
 
     uint64_t materialAddress : MATERIAL_ADDRESS;
     uint materialIndex : MATERIAL_INDEX;
@@ -144,7 +143,7 @@ VSOutput VSMain(VSInput input) {
 
     output.pos = mul(vertexConstants.projection, mul(vertexConstants.view, mul(modelMatrix, float4(input.inPosition.xyz, 1.0))));
     // Do I actually need both projection and view matrices?
-    output.normal = mul(mul(vertexConstants.view, modelMatrix), input.inNormal);
+    output.normal = mul(mul(vertexConstants.view, modelMatrix), float4(input.inNormal, 0.0));
     output.UV = input.inUV;
 
     output.fragPos = mul(mul(vertexConstants.view, modelMatrix), float4(input.inPosition.xyz, 1.0));

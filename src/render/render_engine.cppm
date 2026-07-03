@@ -1035,7 +1035,6 @@ private:
             m_PointGraphicsPipelineLayout,
             vk::PipelineBindPoint::eGraphics
         );
-
     }
 
     void createColorResources() {
@@ -1276,10 +1275,7 @@ private:
 
         // Draw particles
         m_PipelineManager->setAndBindActivePipeline(POINT_GRAPHICS_PIPELINE_NAME);
-        m_PipelineManager->bindVertices(m_ComputeDataBuffers[m_FrameIndex].buffer);
-        m_PipelineManager->bindVertexPushConstants();
-        // TODO extract into pipeline manager?
-        commandBuffer.draw(PARTICLE_COUNT, 1, 0, 0);
+        m_PipelineManager->bindAndDraw(m_ComputeDataBuffers[m_FrameIndex].buffer, PARTICLE_COUNT, 1);
 
         // Common model rendering bindings
         m_PipelineManager->setAndBindActivePipeline(GRAPHICS_PIPELINE_NAME);

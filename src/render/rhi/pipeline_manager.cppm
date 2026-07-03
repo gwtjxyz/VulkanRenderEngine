@@ -17,6 +17,7 @@ export module pipeline_manager;
 
 import device_mapper;
 import render_types;
+import scene_graph_types;
 import vulkan_instance;
 
 import glm;
@@ -41,7 +42,7 @@ struct Pipeline {
 export class PipelineManager;
 GENERATE_LOCATOR(PipelineManager)
 
-export class PipelineManager {
+class PipelineManager {
 private:
     // Need to be careful with this - push constant size is limited
     // NOTE: Order of variables here has to be the exact same as on GPU side!
@@ -144,10 +145,6 @@ public:
         m_ActiveCommandBuffer.bindIndexBuffer(indexBuffer, 0, vk::IndexType::eUint32);
     }
 
-    void bindVertices(const vk::Buffer vertexBuffer) const {
-        m_ActiveCommandBuffer.bindVertexBuffers(0, vertexBuffer, { 0 });
-    }
-
     void bindVertexPushConstants() const {
         m_ActiveCommandBuffer.pushConstants(
             m_ActivePipeline->layout,
@@ -158,6 +155,13 @@ public:
         );
     }
 
+    void bindAndDraw(const vk::Buffer vertexBuffer, uint32_t vertexCount, const uint32_t instanceCount) const {
+        bindVertexPushConstants();
+
+        m_ActiveCommandBuffer.bindVertexBuffers(0, vertexBuffer, { 0 });
+        m_ActiveCommandBuffer.draw(vertexCount, instanceCount, 0, 0);
+    }
+
     void bindAndDrawIndexed(const uint32_t drawIndex, const vk::Buffer vertexBuffer, const vk::Buffer indexBuffer, const uint32_t indexCount, const uint32_t instanceCount) {
         m_VertexPushConstants.drawIndex = drawIndex;
         bindVertexPushConstants();
@@ -165,6 +169,16 @@ public:
         m_ActiveCommandBuffer.bindVertexBuffers(0, vertexBuffer, { 0 });
         m_ActiveCommandBuffer.bindIndexBuffer(indexBuffer, 0, vk::IndexType::eUint32);
         m_ActiveCommandBuffer.drawIndexed(indexCount, instanceCount, 0, 0, 0);
+    }
+
+    // TODO add instancing support
+    void executeDrawCall(DrawCallData drawData) {
+        m_VertexPushConstants.drawIndex = drawData.drawIndex;
+        bindVertexPushConstants();
+
+        m_ActiveCommandBuffer.bindVertexBuffers(0, drawData.vertexBuffer, { drawData.vertexOffset });
+        m_ActiveCommandBuffer.bindIndexBuffer(drawData.indexBuffer, 0, vk::IndexType::eUint32);
+        m_ActiveCommandBuffer.drawIndexed(drawData.indexCount, 0, drawData.firstIndex, drawData.vertexOffset, 0);
     }
 
     void registerPipeline(const std::string & pipelineName) {

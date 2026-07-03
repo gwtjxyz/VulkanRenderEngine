@@ -19,7 +19,7 @@ import glm;
 import vulkan;
 #endif
 
-export typedef uint32_t hlsl_bool;
+export using hlsl_bool = uint32_t;
 
 export constexpr uint32_t INDEX_UNSET = UINT32_MAX;
 
@@ -30,8 +30,8 @@ export enum class LightMode : int32_t {
 };
 
 export struct Vertex {
-    glm::vec4 pos;
-    glm::vec4 normal;
+    glm::vec3 pos;
+    glm::vec3 normal;
     glm::vec2 texCoord;
 
     static vk::VertexInputBindingDescription getBindingDescription() {
@@ -40,8 +40,8 @@ export struct Vertex {
 
     static std::array<vk::VertexInputAttributeDescription, 3> getAttributeDescriptions() {
         return {
-            vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32B32A32Sfloat, offsetof(Vertex, pos)),
-            vk::VertexInputAttributeDescription(1, 0, vk::Format::eR32G32B32A32Sfloat, offsetof(Vertex, normal)),
+            vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, pos)),
+            vk::VertexInputAttributeDescription(1, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, normal)),
             vk::VertexInputAttributeDescription(2, 0, vk::Format::eR32G32Sfloat, offsetof(Vertex, texCoord))
         };
     }

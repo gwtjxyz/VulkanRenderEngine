@@ -39,7 +39,6 @@ find_package (glfw3 REQUIRED)
 find_package (glm REQUIRED)
 find_package(stb REQUIRED)
 find_package (tinyobjloader REQUIRED)
-#find_package (tinygltf REQUIRED)
 #find_package (KTX REQUIRED)
 
 # Fetch latest Vulkan headers if the installed ones are out of date
@@ -134,6 +133,14 @@ target_sources(glm-module PUBLIC
 )
 target_link_libraries(glm-module PUBLIC glm::glm)
 
+#fastgltf
+set(FASTGLTF_COMPILE_AS_CPP20 ON)
+set(FASTGLTF_ENABLE_CPP_MODULES ON)
+if(MSVC)
+    set(FASTGLTF_USE_STD_MODULE ON)
+endif()
+add_subdirectory(external/fastgltf)
+
 # TODO maybe add __cplusplus definition to this too, works fine without it so far though so will do later if problems arise
 add_library(tinyobjloader-module)
 target_sources(tinyobjloader-module PUBLIC
@@ -179,11 +186,11 @@ add_executable(VulkanRenderEngine src/main.cpp ${IMGUI_SOURCES}
 # Compile modules
 target_sources(VulkanRenderEngine PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
-        src/core/platform.cppm src/core/input.cppm src/core/hlsl_compiler.cppm src/core/constants.cppm
-        src/entity/ecs.cppm src/entity/entity_system.cppm src/entity/components.cppm
-        src/resource/resource.cppm
+        src/core/platform.cppm src/core/input.cppm src/core/hlsl_compiler.cppm src/core/constants.cppm src/core/utils.cppm
+        src/entity/entity_system.cppm src/entity/components.cppm
+        src/resource/resource.cppm src/resource/model_parser.cppm src/resource/scene_graph_types.cppm
         src/render/render_engine.cppm src/render/camera.cppm
-        src/render/render_types.cppm src/render/culling_system.cppm
+        src/render/render_types.cppm
         src/render/rhi/vulkan_instance.cppm src/render/rhi/vulkan_resource_service.cppm
         src/render/rhi/device_mapper.cppm src/render/rhi/pipeline_manager.cppm
 )
@@ -198,7 +205,7 @@ target_include_directories(VulkanRenderEngine PRIVATE AFTER $ENV{VULKAN_SDK}/Inc
 target_include_directories(VulkanRenderEngine PRIVATE AFTER $ENV{VULKAN_SDK}/Include/vma)
 
 target_link_libraries(VulkanRenderEngine PRIVATE
-        Vulkan-HppModule glfw glm-module stb::stb tinyobjloader-module ImGui flecs
+        Vulkan-HppModule glfw glm-module stb::stb tinyobjloader-module ImGui flecs fastgltf_module
         ${dxcompiler_LIBRARY}
 )
 
