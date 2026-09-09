@@ -172,7 +172,7 @@ public:
     }
 
     // TODO add instancing support
-    void executeDrawCall(DrawCallData drawData) {
+    void executeDrawCall(SceneGraphTypes::DrawCallData drawData) {
         m_VertexPushConstants.drawIndex = drawData.drawIndex;
         bindVertexPushConstants();
 

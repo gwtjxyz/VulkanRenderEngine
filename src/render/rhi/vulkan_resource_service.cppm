@@ -179,7 +179,7 @@ public:
 
     template <typename T>
     std::vector<VulkanComputeBufferData> createComputeBuffers(int maxFramesInFlight, std::vector<T> & data) {
-        assert(!data.empty(), "Cannot create compute buffers without supplying any data to them!");
+        assert(!data.empty());
 
         std::vector<VulkanComputeBufferData> computeBufferData {};
 

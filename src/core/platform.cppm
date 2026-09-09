@@ -40,6 +40,10 @@ export std::filesystem::path pathFromProjectDir(const std::string & relativePath
     return combinedPath;
 }
 
+export std::filesystem::path pathFromAssetDir(const std::string & relativePath) {
+    return pathFromProjectDir("assets/" + relativePath);
+}
+
 export FileInfo getFileInfo(const std::string & relativePath) {
     auto absolutePath = pathFromProjectDir(relativePath);
     auto extension = absolutePath.extension().string();

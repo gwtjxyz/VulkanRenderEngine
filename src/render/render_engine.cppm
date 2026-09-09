@@ -8,6 +8,7 @@ module;
 
 #ifdef DISABLE_IMPORT_STD
 #include <iostream>
+#include <random>
 #endif
 
 #define GLFW_INCLUDE_VULKAN
@@ -23,12 +24,14 @@ export module render_engine;
 import std;
 #endif
 
+import asset_manager;
 import camera;
 import constants;
 import components;
 import entity_system;
 import device_mapper;
 import hlsl_compiler;
+import model_parser;
 import pipeline_manager;
 import platform;
 import render_types;
@@ -78,6 +81,8 @@ private:
         PipelineManagerLocator::provide(m_PipelineManager.get());
         m_DeviceMapper = std::make_shared<DeviceMapper>();
         DeviceMapperLocator::provide(m_DeviceMapper.get());
+        m_ModelParser = std::make_shared<ModelParser>();
+        ModelParserLocator::provide(m_ModelParser.get());
     }
 
     void initWindow(const std::string & appName) {
@@ -1057,7 +1062,12 @@ private:
     }
 
     void loadEntities() {
-        m_EntitySystem.setupWorld(m_ResourceManager);
+        m_EntitySystem.setupWorld(m_AssetManager);
+        m_AssetManager.loadAll();
+
+        // TODO remove - temporary
+        m_ResourceManager.load<Texture>(VIKING_ROOM_TEXTURE_NAME);
+        m_ResourceManager.load<Texture>(TERRAIN_TEXTURE_NAME);
     }
 
     void createComputeBuffers() {
@@ -1392,7 +1402,11 @@ private:
     std::shared_ptr<VulkanResourceService> m_VulkanResourceService = nullptr;
     std::shared_ptr<DeviceMapper> m_DeviceMapper = nullptr;
     std::shared_ptr<PipelineManager> m_PipelineManager = nullptr;
+    std::shared_ptr<ModelParser> m_ModelParser = nullptr;
+
+
     ResourceManager m_ResourceManager {};
+    AssetManager m_AssetManager {};
     HlslShaderCompiler m_ShaderCompiler {};
     EntitySystem m_EntitySystem {};
 

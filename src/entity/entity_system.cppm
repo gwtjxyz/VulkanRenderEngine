@@ -9,12 +9,14 @@ module;
 
 export module entity_system;
 
+import asset_manager;
+import bit_flags;
 import components;
 import constants;
 import device_mapper;
 import pipeline_manager;
 import render_types;
-import resource;
+import scene_graph_types;
 
 #ifndef DISABLE_IMPORT_STD
 import std;
@@ -24,7 +26,7 @@ import glm;
 export class EntitySystem {
 public:
     EntitySystem() {
-        m_ObjectPrefab = m_World.prefab("Prefab_Object").set(CDraw {}).set(CTransform {}).set(CMesh {});
+        m_ObjectPrefab = m_World.prefab("Prefab_Object").set(CTransform {}).set(CMesh {});
         m_LightPrefab = m_World.prefab("Prefab_Light").set(CLight {}).set(CTransform {});
 
         prepareLightSystem();
@@ -34,7 +36,7 @@ public:
 
     // Creates all the entities that we will be drawing
     // TODO modularize
-    void setupWorld(ResourceManager & resourceManager) {
+    void setupWorld(AssetManager & assetManager) {
         // Spinning room
         auto room = m_World.entity(VIKING_ROOM_ENTITY_NAME.c_str()).is_a(m_ObjectPrefab);
         auto & t1 = room.get_mut<CTransform>();
@@ -42,12 +44,13 @@ public:
         t1.rotateX(-90.0f);
 
         auto & m1 = room.get_mut<CMesh>();
-        auto textureHandle = resourceManager.load<Texture>("assets/" + VIKING_ROOM_TEXTURE_NAME + ".png");
-        auto materialHandle = resourceManager.load<Material>(VIKING_ROOM_MATERIAL_NAME);
-        auto meshHandle = resourceManager.load<Asset3D>("assets/" + VIKING_ROOM_MODEL_NAME + ".obj");
-        materialHandle.get()->setTexture(textureHandle.get());
-        m1.material = materialHandle.get();
-        m1.mesh = meshHandle.get();
+        // auto textureHandle = resourceManager.load<Texture>("assets/" + VIKING_ROOM_TEXTURE_NAME + ".png");
+        // auto materialHandle = resourceManager.load<Material>(VIKING_ROOM_MATERIAL_NAME);
+        // auto meshHandle = resourceManager.load<Asset3D>("assets/" + VIKING_ROOM_MODEL_NAME + ".obj");
+        // materialHandle.get()->setTexture(textureHandle.get());
+        auto * vikingRoomAssetHandle = assetManager.getOrCreateAsset(VIKING_ROOM_MODEL_NAME);
+        vikingRoomAssetHandle->load();
+        m1.asset = vikingRoomAssetHandle;
 
         auto terrain = m_World.entity(TERRAIN_ENTITY_NAME.c_str()).is_a(m_ObjectPrefab);
         auto & t2 = terrain.get_mut<CTransform>();
@@ -55,12 +58,13 @@ public:
         t2.scale = glm::vec3(0.2f);
 
         auto & m2 = terrain.get_mut<CMesh>();
-        textureHandle = resourceManager.load<Texture>("assets/" + TERRAIN_TEXTURE_NAME + ".png");
-        materialHandle = resourceManager.load<Material>(TERRAIN_MATERIAL_NAME);
-        meshHandle = resourceManager.load<Asset3D>("assets/" + TERRAIN_MODEL_NAME + ".obj");
-        materialHandle.get()->setTexture(textureHandle.get());
-        m2.material = materialHandle.get();
-        m2.mesh = meshHandle.get();
+        // textureHandle = resourceManager.load<Texture>("assets/" + TERRAIN_TEXTURE_NAME + ".png");
+        // materialHandle = resourceManager.load<Material>(TERRAIN_MATERIAL_NAME);
+        // meshHandle = resourceManager.load<Asset3D>("assets/" + TERRAIN_MODEL_NAME + ".obj");
+        // materialHandle.get()->setTexture(textureHandle.get());
+        auto * terrainAssetHandle = assetManager.getOrCreateAsset(TERRAIN_MODEL_NAME);
+        terrainAssetHandle->load();
+        m2.asset = terrainAssetHandle;
 
         auto light = m_World.entity(LIGHT_ENTITY_NAME.c_str()).is_a(m_LightPrefab);
         auto & t3 = light.get_mut<CTransform>();
@@ -134,36 +138,19 @@ private:
     }
 
     void prepareObjectSystem() {
-        m_ObjectPrepareSystem = m_World.system<CDraw, CTransform, CMesh>().each(
-            [this](flecs::iter & it, size_t row, CDraw & d, CTransform & t, CMesh & m) {
-                auto * deviceMapper = DeviceMapperLocator::locate();
-                // Set up indices if they were unset before
-                if (d.index == INDEX_UNSET) {
-                    d.index = deviceMapper->addDraw();
+        m_ObjectPrepareSystem = m_World.system<CTransform, CMesh>().each(
+            [this](flecs::iter & it, size_t row, CTransform & t, CMesh & m) {
+                if (!m.asset || !m.asset->isLoaded()) {
+                    return;
                 }
-                if (t.index == INDEX_UNSET) {
-                    t.index = deviceMapper->addTransform();
-                }
-                // Don't need to do it for mesh component - material system handles it automatically
 
-                uint32_t drawIndex = d.index;
-                uint32_t transformIndex = t.index;
-                uint32_t materialIndex = m.material->getIndex();
-
-                auto * drawPtr = deviceMapper->getDraw(drawIndex);
-                drawPtr->layout.enabled = d.enabled;
-
-                if (t.dirty) {
-                    mapTransform(t, deviceMapper);
+                if (t.dirty || m.outOfDate) {
+                    m.asset->updateSceneTransform(
+                        toSceneGraphTransform(t),
+                        TransformUpdateFlags::Translation | TransformUpdateFlags::Scale | TransformUpdateFlags::Rotation,
+                        true
+                    );
                     t.dirty = false;
-                }
-                // Pretty sure we need to do this every time, because what if the same transform is used for
-                // both light source and object? One of them will update first, then the other will be not dirty.
-                drawPtr->layout.transformIndex = transformIndex;
-
-                // If material is out of date, update draw buffer with it
-                if (m.material->update() || m.outOfDate) {
-                    drawPtr->layout.materialIndex = materialIndex;
                     m.outOfDate = false;
                 }
             }
@@ -171,23 +158,20 @@ private:
     }
 
     void prepareRenderSystem() {
-        m_RenderSystem = m_World.system<CDraw, CTransform, CMesh>().each(
-            [](flecs::iter & it, size_t row, CDraw & d, CTransform & t, CMesh & m) {
-                auto * pipelineManager = PipelineManagerLocator::locate();
-                // Don't draw if data is incomplete
-                bool drawOffOrIncomplete = d.enabled == false || d.index == INDEX_UNSET;
-                bool transformIncomplete = t.index == INDEX_UNSET;
-                bool meshIncomplete = m.material->getIndex() == INDEX_UNSET;
+        m_RenderSystem = m_World.system<CTransform, CMesh>().each(
+            [](flecs::iter & it, size_t row, CTransform & t, CMesh & m) {
+                if (!m.asset || !m.asset->isLoaded()) {
+                    return;
+                }
 
-                if (drawOffOrIncomplete || transformIncomplete || meshIncomplete) return;
-
-                pipelineManager->bindAndDrawIndexed(
-                    d.index,
-                    m.mesh->getVertexBuffer(),
-                    m.mesh->getIndexBuffer(),
-                    m.mesh->getIndexCount(),
-                    1
-                );
+                auto drawCallData = m.asset->prepareDrawData();
+                if (!drawCallData.empty()) {
+                    auto * pipelineManager = PipelineManagerLocator::locate();
+                    for (auto & drawCall : drawCallData) {
+                        // TODO draw call sorting, culling, etc
+                        pipelineManager->executeDrawCall(drawCall);
+                    }
+                }
             }
         );
     }
@@ -197,6 +181,10 @@ private:
         transformPtr->layout.position = glm::vec4(t.position, 1.0f);
         transformPtr->layout.rotation = glm::vec4(t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w);
         transformPtr->layout.scale = glm::vec4(t.scale, 0.0f);
+    }
+
+    static SceneGraphTypes::Transform toSceneGraphTransform(const CTransform & transform) {
+        return { transform.position, transform.rotation, transform.scale };
     }
 
 private:

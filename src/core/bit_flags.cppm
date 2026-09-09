@@ -1,16 +1,23 @@
 module;
 
 #ifdef DISABLE_IMPORT_STD
+#include <compare>
 #include <type_traits>
 #endif
 
 #include <cstdint>
 
-export module utils;
+export module bit_flags;
 
 #ifndef DISABLE_IMPORT_STD
 import std;
 #endif
+
+// Wrapper for type-safe enum bitmasks, following vulkan-hpp's model
+
+// ==========================
+// Bit flag utilities
+// ==========================
 
 export template <typename T>
 struct FlagTraits {
@@ -123,4 +130,19 @@ constexpr BitFlags<BitType> operator~(BitType bit) noexcept {
     return ~BitFlags<BitType>(bit);
 }
 
-// Wrapper for type-safe enum bitmasks, following vulkan-hpp's model
+// ==========================
+// Bit flags
+// ==========================
+
+export enum class TransformUpdateFlags : uint32_t {
+    Translation = 1 << 0,
+    Rotation = 1 << 1,
+    Scale = 1 << 2
+};
+
+export template<>
+struct FlagTraits<TransformUpdateFlags> {
+    static constexpr bool isBitmask = true;
+    static constexpr BitFlags<TransformUpdateFlags> allFlags =
+        TransformUpdateFlags::Translation | TransformUpdateFlags::Rotation | TransformUpdateFlags::Scale;
+};

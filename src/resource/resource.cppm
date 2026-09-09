@@ -471,7 +471,6 @@ private:
 
     // If the asset is a simple mesh, it manages its own memory; otherwise, the underlying scene structure does it
     bool m_SimpleMesh = true;
-    SceneGraphAsset * m_SceneGraph = nullptr;
 
     // Vertex data management - stores per-vertex attributes like position, normal, uv coords
     vk::Buffer m_VertexBuffer = nullptr;                    // GPU buffer containing vertex attribute data

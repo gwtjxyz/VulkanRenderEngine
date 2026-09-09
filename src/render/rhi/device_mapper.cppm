@@ -86,6 +86,7 @@ struct LightLayout {
 
 // Layout = what we send to the GPU
 // other params = everything else we need to track on the CPU side to enable rendering
+// TODO simplify - no need for templating here
 template <typename Layout>
 struct DataBuffer {
     Layout layout {};

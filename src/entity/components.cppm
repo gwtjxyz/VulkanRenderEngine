@@ -5,7 +5,7 @@ module;
 export module components;
 
 import render_types;
-import resource;
+import scene_graph_types;
 
 import glm;
 
@@ -42,8 +42,7 @@ export struct CTransform {
 };
 
 export struct CMesh {
-    Asset3D * mesh = nullptr;       // contains vertex/index buffer info
-    Material * material = nullptr;  // contains material index
+    SceneGraphAsset * asset = nullptr;       // contains vertex/index buffer info + material info
     bool outOfDate = true;
 };
 
