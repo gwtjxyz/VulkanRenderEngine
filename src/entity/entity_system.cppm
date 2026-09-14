@@ -13,6 +13,7 @@ import asset_manager;
 import bit_flags;
 import components;
 import constants;
+import core_types;
 import device_mapper;
 import pipeline_manager;
 import render_types;
@@ -38,37 +39,31 @@ public:
     // TODO modularize
     void setupWorld(AssetManager & assetManager) {
         // Spinning room
-        auto room = m_World.entity(VIKING_ROOM_ENTITY_NAME.c_str()).is_a(m_ObjectPrefab);
-        auto & t1 = room.get_mut<CTransform>();
-        t1.position = { 0.0f, -0.5f, -2.0f };
-        t1.rotateX(-90.0f);
+        auto roomEntity = m_World.entity(VIKING_ROOM_ENTITY_NAME.c_str()).is_a(m_ObjectPrefab);
+        auto & roomTransform = roomEntity.get_mut<CTransform>();
+        roomTransform.position = { 0.0f, -0.5f, -2.0f };
+        roomTransform.rotateX(-90.0f);
 
-        auto & m1 = room.get_mut<CMesh>();
-        // auto textureHandle = resourceManager.load<Texture>("assets/" + VIKING_ROOM_TEXTURE_NAME + ".png");
-        // auto materialHandle = resourceManager.load<Material>(VIKING_ROOM_MATERIAL_NAME);
-        // auto meshHandle = resourceManager.load<Asset3D>("assets/" + VIKING_ROOM_MODEL_NAME + ".obj");
-        // materialHandle.get()->setTexture(textureHandle.get());
+        auto & roomMesh = roomEntity.get_mut<CMesh>();
         auto * vikingRoomAssetHandle = assetManager.getOrCreateAsset(VIKING_ROOM_MODEL_NAME);
         vikingRoomAssetHandle->load();
-        m1.asset = vikingRoomAssetHandle;
+        roomMesh.asset = vikingRoomAssetHandle;
 
-        auto terrain = m_World.entity(TERRAIN_ENTITY_NAME.c_str()).is_a(m_ObjectPrefab);
-        auto & t2 = terrain.get_mut<CTransform>();
-        t2.position = { -20.0f, -15.0f, 30.0f };
-        t2.scale = glm::vec3(0.2f);
+        // Terrain
+        auto terrainEntity = m_World.entity(TERRAIN_ENTITY_NAME.c_str()).is_a(m_ObjectPrefab);
+        auto & terrainTransform = terrainEntity.get_mut<CTransform>();
+        terrainTransform.position = { -20.0f, -15.0f, 30.0f };
+        terrainTransform.scale = glm::vec3(0.1f);
 
-        auto & m2 = terrain.get_mut<CMesh>();
-        // textureHandle = resourceManager.load<Texture>("assets/" + TERRAIN_TEXTURE_NAME + ".png");
-        // materialHandle = resourceManager.load<Material>(TERRAIN_MATERIAL_NAME);
-        // meshHandle = resourceManager.load<Asset3D>("assets/" + TERRAIN_MODEL_NAME + ".obj");
-        // materialHandle.get()->setTexture(textureHandle.get());
+        auto & terrainMesh = terrainEntity.get_mut<CMesh>();
         auto * terrainAssetHandle = assetManager.getOrCreateAsset(TERRAIN_MODEL_NAME);
         terrainAssetHandle->load();
-        m2.asset = terrainAssetHandle;
+        terrainMesh.asset = terrainAssetHandle;
 
+        // Light source
         auto light = m_World.entity(LIGHT_ENTITY_NAME.c_str()).is_a(m_LightPrefab);
-        auto & t3 = light.get_mut<CTransform>();
-        t3.position = { 0.0f, -10.0f, 10.0f };
+        auto & lightTransform = light.get_mut<CTransform>();
+        lightTransform.position = { 0.0f, -10.0f, 10.0f };
 
         // TODO Setup callbacks
     }
@@ -159,7 +154,7 @@ private:
 
     void prepareRenderSystem() {
         m_RenderSystem = m_World.system<CTransform, CMesh>().each(
-            [](flecs::iter & it, size_t row, CTransform & t, CMesh & m) {
+            [this](flecs::iter & it, size_t row, CTransform & t, CMesh & m) {
                 if (!m.asset || !m.asset->isLoaded()) {
                     return;
                 }

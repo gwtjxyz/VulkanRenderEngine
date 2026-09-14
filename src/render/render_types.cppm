@@ -21,8 +21,6 @@ import vulkan;
 
 export using hlsl_bool = uint32_t;
 
-export constexpr uint32_t INDEX_UNSET = UINT32_MAX;
-
 export enum class LightMode : int32_t {
     Off = 0,
     Phong = 1,

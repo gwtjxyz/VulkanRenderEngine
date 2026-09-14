@@ -22,6 +22,7 @@ export module resource;
 import std;
 #endif
 
+import core_types;
 import device_mapper;
 import model_parser;
 import platform;
@@ -265,6 +266,7 @@ protected:
         // Should work for both PNGs and JPEGs, will expand as necessary
         StbImageWrapper data = loadImageData();
         if (!data.pixels) {
+            std::cerr << "Failed to load image data of texture " << (m_FileInfo.absolutePath / m_FileInfo.extension) << std::endl;
             return false;
         }
 

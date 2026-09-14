@@ -4,6 +4,7 @@ module;
 
 export module components;
 
+import core_types;
 import render_types;
 import scene_graph_types;
 
