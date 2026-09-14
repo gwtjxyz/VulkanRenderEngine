@@ -12,6 +12,9 @@ module;
 #include <vulkan/vulkan.hpp>
 #endif
 
+#include <cassert>
+#include <cstdint>
+
 export module scene_graph_types;
 
 #ifndef DISABLE_IMPORT_STD
@@ -27,6 +30,7 @@ import vulkan;
 import bit_flags;
 import device_mapper;
 import render_types;
+import core_types;
 import vulkan_resource_service;
 
 namespace SceneGraphTypes {
@@ -34,6 +38,14 @@ export struct Transform {
     glm::vec3 translation = glm::vec3(0.0f);
     glm::quat rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
     glm::vec3 scale = glm::vec3(1.0f);
+
+    static glm::mat4x4 identity() {
+        const glm::vec3 t(0.0f);
+        const glm::quat r(1.0f, 0.0f, 0.0f, 0.0f);
+        const glm::vec3 s(1.0f);
+
+        return glm::translate(glm::mat4_cast(r) * glm::scale(glm::mat4x4(1.0f), s), t);
+    }
 
     glm::mat4x4 asMatrix() const {
         return glm::translate(
@@ -77,35 +89,32 @@ export struct Scene;
 // Temporary node implementation - subject to change/removal
 // Should use flecs for this maybe?
 export struct Node {
-    Node * parent = nullptr;
-    Scene * scene = nullptr;
+    uint32_t parentNodeIndex = UINT32_MAX;
     std::string name;
     std::vector<uint32_t> childIndices;
 
     std::optional<uint32_t> meshIndex;
-    Transform localTransform;
+    Transform localTransform {};
 };
 
 export struct Material;
 
+// Structure containing vertex data inside a mesh node
 export struct Primitive {
-    Scene * parent = nullptr;
-
     uint32_t vertexOffset;      // index, not bytes!
     uint32_t firstIndex;
     uint32_t indexCount;
 
     uint32_t materialIndex;
-
-    Material * associatedMaterial() const;
 };
 
+// Structure containing an array of primitives with vertex data and their transform
 export struct Mesh {
-    Node * parent = nullptr;
+    uint32_t parentNodeIndex = UINT32_MAX;
     std::vector<Primitive> primitives;
 
     bool globalTransformDirty = true;
-    glm::mat4x4 globalTransform;
+    glm::mat4x4 globalTransform = Transform::identity();
 };
 
 export struct DrawCallData {
@@ -134,20 +143,18 @@ struct Scene {
 
     std::vector<uint32_t> rootIndices;
 
+    // TODO should this really be a pointer? Or would making it a reference be better?
     Node * nodeAtIndex(const uint32_t index) {
+        if (index == UINT32_MAX) return nullptr;
+
         return &nodes.at(index);
     }
 };
-
-Material * Primitive::associatedMaterial() const {
-    return &parent->materials.at(materialIndex);
-}
 }
 
 export class SceneGraphAsset {
 private:
     using graph_index = uint32_t;
-    using device_index = uint32_t;
 
     struct MeshPrimitiveIndex {
         graph_index meshIndex;
@@ -217,6 +224,8 @@ public:
 
             meshIndex++;
         }
+
+        m_Loaded = true;
     }
 
     // Unloads data from the device mapper
@@ -279,7 +288,7 @@ public:
 
         graph_index meshIndex = 0;
         for (auto & m : m_Scene.meshes) {
-            if (!m.parent) continue;
+            if (!m_Scene.nodeAtIndex(m.parentNodeIndex)) continue;
 
             // Compute and update transform if needed
             if (m.globalTransformDirty) {
@@ -339,20 +348,21 @@ public:
 
 private:
     // Need to apply to bottom-most nodes
-    static glm::mat4x4 computeGlobalTransform(const SceneGraphTypes::Node * node) {
+    glm::mat4x4 computeGlobalTransform(const SceneGraphTypes::Node * node) {
         assert(node);
 
         const glm::mat4x4 localModelMatrix = node->localTransform.asMatrix();
 
-        if (!node->parent) {
-            return node->scene->sceneTransform.asMatrix() * localModelMatrix;
+        // What happens if sceneTransform is empty? Why is it even empty?
+        if (node->parentNodeIndex == UINT32_MAX) {
+            return m_Scene.sceneTransform.asMatrix() * localModelMatrix;
         }
 
-        return computeGlobalTransform(node->parent) * localModelMatrix;
+        return computeGlobalTransform(m_Scene.nodeAtIndex(node->parentNodeIndex)) * localModelMatrix;
     }
 
-    void computeAndLoadGlobalMeshTransform(graph_index meshIndex, SceneGraphTypes::Mesh & mesh) const {
-        glm::mat4x4 globalTransformMatrix = computeGlobalTransform(mesh.parent);
+    void computeAndLoadGlobalMeshTransform(graph_index meshIndex, SceneGraphTypes::Mesh & mesh) {
+        glm::mat4x4 globalTransformMatrix = computeGlobalTransform(m_Scene.nodeAtIndex(mesh.parentNodeIndex));
         mesh.globalTransform = globalTransformMatrix;
 
         auto [translation, rotation, scale] = SceneGraphTypes::Transform::fromMatrix(mesh.globalTransform);
@@ -374,7 +384,7 @@ private:
 
 private:
     SceneGraphTypes::Scene m_Scene {};
-    bool m_Loaded;
+    bool m_Loaded = false;
     DeviceMapper * m_DeviceMapper;
 
     // different for each mesh+primitive combo

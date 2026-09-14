@@ -140,9 +140,10 @@ export enum class TransformUpdateFlags : uint32_t {
     Scale = 1 << 2
 };
 
-export template<>
+export { template<>
 struct FlagTraits<TransformUpdateFlags> {
     static constexpr bool isBitmask = true;
     static constexpr BitFlags<TransformUpdateFlags> allFlags =
         TransformUpdateFlags::Translation | TransformUpdateFlags::Rotation | TransformUpdateFlags::Scale;
 };
+}

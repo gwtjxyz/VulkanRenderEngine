@@ -26,6 +26,7 @@ import glm;
 import vulkan;
 #endif
 
+import core_types;
 import render_types;
 import vulkan_resource_service;
 
@@ -108,6 +109,7 @@ export class DeviceMapper;
 GENERATE_LOCATOR(DeviceMapper)
 
 // Handles mapping GPU buffers and syncing them with data stored on the CPU
+// TODO simplify allocations etc
 class DeviceMapper {
 public:
     DeviceMapper() = default;

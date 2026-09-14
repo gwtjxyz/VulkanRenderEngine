@@ -190,6 +190,9 @@ private:
         // GUI
         setupImgui();
 
+        // Pipeline draw data
+        m_DeviceMapper->preallocateBuffers(100, MAX_FRAMES_IN_FLIGHT);
+
         // Load assets
         loadEntities();
 
@@ -206,8 +209,6 @@ private:
         createCommandBuffers();
         createComputeCommandBuffers();
 
-        // Pipeline draw data
-        m_DeviceMapper->preallocateBuffers(100, MAX_FRAMES_IN_FLIGHT);
         createComputeBuffers();
 
         // Image resources to draw into

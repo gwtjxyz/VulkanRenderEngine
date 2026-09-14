@@ -257,7 +257,6 @@ public:
         // first, put each node into scene struct
         for (auto & n : asset->nodes) {
             SceneGraphTypes::Node node {};
-            node.scene = &scene;
             node.name = n.name;
             node.localTransform = extractLocalTransform(n);
             if (n.meshIndex.has_value()) {
@@ -281,10 +280,10 @@ public:
             SceneGraphTypes::Node * node = scene.nodeAtIndex(nodeIndex);
             for (auto childIdx : n.children) {
                 node->childIndices.emplace_back(childIdx);
-                scene.nodeAtIndex(childIdx)->parent = node;
+                scene.nodeAtIndex(childIdx)->parentNodeIndex = nodeIndex;
             }
             if (node->meshIndex.has_value()) {
-                scene.meshes.at(node->meshIndex.value()).parent = node;
+                scene.meshes.at(node->meshIndex.value()).parentNodeIndex = nodeIndex;
             }
 
             nodeIndex++;
@@ -321,14 +320,14 @@ public:
             for (const auto & index : shape.mesh.indices) {
                 Vertex vertex {};
                 vertex.pos = {
-                    attrib.vertices[3 * index.vertex_index + 0],
+                    attrib.vertices[3 * index.vertex_index],
                     attrib.vertices[3 * index.vertex_index + 1],
                     attrib.vertices[3 * index.vertex_index + 2]
                 };
 
                 // OBJ assumes 0 = bottom of the image, but Vulkan works with 0 = top of the image, so we flip y coord
                 vertex.texCoord = {
-                    attrib.texcoords[2 * index.texcoord_index + 0],
+                    attrib.texcoords[2 * index.texcoord_index],
                     1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
                 };
                 vertex.normal = {
@@ -363,7 +362,6 @@ public:
 
         // Add one root node
         SceneGraphTypes::Node rootNode {};
-        rootNode.scene = &scene;
         rootNode.name = "root";
         rootNode.meshIndex = 0;
         scene.nodes.emplace_back(rootNode);
@@ -375,12 +373,13 @@ public:
 
         // Add one primitive
         SceneGraphTypes::Primitive primitive {};
-        primitive.parent = &scene;
         primitive.materialIndex = 0;
+        primitive.firstIndex = 0;
+        primitive.indexCount = indices.size();
 
         // Add one mesh
         SceneGraphTypes::Mesh mesh {};
-        mesh.parent = scene.nodeAtIndex(0);
+        mesh.parentNodeIndex = 0;
         mesh.primitives.emplace_back(primitive);
         scene.meshes.emplace_back(mesh);
 

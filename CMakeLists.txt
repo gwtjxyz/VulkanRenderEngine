@@ -186,7 +186,7 @@ add_executable(VulkanRenderEngine src/main.cpp ${IMGUI_SOURCES}
 # Compile modules
 target_sources(VulkanRenderEngine PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
-        src/core/platform.cppm src/core/input.cppm src/core/hlsl_compiler.cppm src/core/constants.cppm src/core/bit_flags.cppm
+        src/core/platform.cppm src/core/input.cppm src/core/hlsl_compiler.cppm src/core/constants.cppm src/core/bit_flags.cppm src/core/core_types.cppm
         src/entity/entity_system.cppm src/entity/components.cppm
         src/resource/resource.cppm src/resource/model_parser.cppm src/resource/scene_graph_types.cppm src/resource/asset_manager.cppm
         src/render/render_engine.cppm src/render/camera.cppm

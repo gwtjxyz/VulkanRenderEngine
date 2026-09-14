@@ -172,13 +172,13 @@ public:
     }
 
     // TODO add instancing support
-    void executeDrawCall(SceneGraphTypes::DrawCallData drawData) {
+    void executeDrawCall(SceneGraphTypes::DrawCallData & drawData) {
         m_VertexPushConstants.drawIndex = drawData.drawIndex;
         bindVertexPushConstants();
 
         m_ActiveCommandBuffer.bindVertexBuffers(0, drawData.vertexBuffer, { drawData.vertexOffset });
         m_ActiveCommandBuffer.bindIndexBuffer(drawData.indexBuffer, 0, vk::IndexType::eUint32);
-        m_ActiveCommandBuffer.drawIndexed(drawData.indexCount, 0, drawData.firstIndex, drawData.vertexOffset, 0);
+        m_ActiveCommandBuffer.drawIndexed(drawData.indexCount, 1, drawData.firstIndex, drawData.vertexOffset, 0);
     }
 
     void registerPipeline(const std::string & pipelineName) {
