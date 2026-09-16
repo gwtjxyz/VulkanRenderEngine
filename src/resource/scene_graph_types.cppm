@@ -44,14 +44,11 @@ export struct Transform {
         const glm::quat r(1.0f, 0.0f, 0.0f, 0.0f);
         const glm::vec3 s(1.0f);
 
-        return glm::translate(glm::mat4_cast(r) * glm::scale(glm::mat4x4(1.0f), s), t);
+        return glm::translate(glm::mat4(1.0f), t) * glm::mat4_cast(r) * glm::scale(glm::mat4(1.0f), s);
     }
 
     glm::mat4x4 asMatrix() const {
-        return glm::translate(
-            glm::mat4_cast(rotation) * glm::scale(glm::mat4x4(1.0f), scale),
-            translation
-        );
+        return glm::translate(glm::mat4(1.0f), translation) * glm::mat4_cast(rotation) * glm::scale(glm::mat4(1.0f), scale);
     }
 
     // Assuming non-negative scaling
@@ -81,6 +78,13 @@ export struct Transform {
 
         return transform;
     }
+};
+
+// Simple, minimal data format for now - TODO expand
+export struct Attribute {
+    glm::vec3 position;
+    glm::vec3 normal;
+    glm::vec2 texcoord0;
 };
 
 // Forward declaration
@@ -120,7 +124,7 @@ export struct Mesh {
 export struct DrawCallData {
     uint32_t drawIndex;
     vk::Buffer vertexBuffer;
-    uint32_t vertexOffset;
+    uint32_t vertexOffsetBytes;
     vk::Buffer indexBuffer;
     uint32_t firstIndex;
     uint32_t indexCount;
@@ -301,7 +305,7 @@ public:
                 SceneGraphTypes::DrawCallData data {};
                 data.drawIndex = m_DrawMap.at({ meshIndex, meshPrimitiveIndex });
                 data.vertexBuffer = m_Scene.vertexBuffer.buffer;
-                data.vertexOffset = mp.vertexOffset;
+                data.vertexOffsetBytes = mp.vertexOffset * sizeof(SceneGraphTypes::Attribute);
                 data.indexBuffer = m_Scene.indexBuffer.buffer;
                 data.firstIndex = mp.firstIndex;
                 data.indexCount = mp.indexCount;

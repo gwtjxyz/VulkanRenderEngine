@@ -49,6 +49,12 @@ public:
         }
     }
 
+    void destroyAll() {
+        for (auto & asset : m_SceneGraphAssets | std::views::values) {
+            asset.destroy();
+        }
+    }
+
 private:
     std::unordered_map<std::string, SceneGraphAsset> m_SceneGraphAssets {};
 };

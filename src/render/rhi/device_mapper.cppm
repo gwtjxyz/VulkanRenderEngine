@@ -34,7 +34,7 @@ import vulkan_resource_service;
 // Note: doesn't support downsizing for now, really - need to be careful about
 // deleting and reusing resources inside these buffers
 struct MappedBufferGroup {
-    std::vector<VulkanShaderBufferData> shaderBuffers;
+    std::vector<VulkanBDABufferData> shaderBuffers;
 
     uint32_t objectCount;                       // How many objects are currently used/allocated
     uint32_t maxObjectCount;                    // Maximum buffer capacity - if we ever exceed it, need to resize
@@ -43,7 +43,7 @@ struct MappedBufferGroup {
 
     explicit MappedBufferGroup() = default;
 
-    explicit MappedBufferGroup(const std::vector<VulkanShaderBufferData> & shaderBufferData, const uint32_t maxObjectCount) :
+    explicit MappedBufferGroup(const std::vector<VulkanBDABufferData> & shaderBufferData, const uint32_t maxObjectCount) :
         shaderBuffers(shaderBufferData),
         objectCount(0),
         maxObjectCount(maxObjectCount) {
@@ -86,7 +86,6 @@ struct LightLayout {
 };
 
 // Layout = what we send to the GPU
-// other params = everything else we need to track on the CPU side to enable rendering
 // TODO simplify - no need for templating here
 template <typename Layout>
 struct DataBuffer {
@@ -271,9 +270,9 @@ private:
     }
 
     void allocateBuffer(const uint32_t initialObjectCount, const VulkanResourceService * resourceService, MappedBufferType bufferType) {
-        std::vector<VulkanShaderBufferData> shaderBufferDataVector {};
+        std::vector<VulkanBDABufferData> shaderBufferDataVector {};
         for (auto i = 0; i < m_MaxFramesInFlight; ++i) {
-            auto shaderBufferData = resourceService->createShaderBuffer(initialObjectCount * getLayoutSize(bufferType));
+            auto shaderBufferData = resourceService->createBDABuffer(initialObjectCount * getLayoutSize(bufferType));
             shaderBufferDataVector.emplace_back(shaderBufferData);
         }
         MappedBufferGroup bufferGroup(shaderBufferDataVector, initialObjectCount);
@@ -288,9 +287,9 @@ private:
 
         const auto resourceService = VulkanResourceServiceLocator::locate();
 
-        std::vector<VulkanShaderBufferData> newBufferData {};
+        std::vector<VulkanBDABufferData> newBufferData {};
         for (uint32_t i = 0; i < m_MaxFramesInFlight; ++i) {
-            auto newBuffer = resourceService->createShaderBuffer(newMaxObjectCount * getLayoutSize(bufferToResize));
+            auto newBuffer = resourceService->createBDABuffer(newMaxObjectCount * getLayoutSize(bufferToResize));
             resourceService->copyBuffer(oldMappedBuffer.shaderBuffers[i].buffer, newBuffer.buffer, oldMappedBuffer.maxObjectCount * getLayoutSize(bufferToResize));
 
             resourceService->freeResourcesAndUnmapMemory(oldMappedBuffer.shaderBuffers[i].buffer, oldMappedBuffer.shaderBuffers[i].bufferMemory);
@@ -307,6 +306,7 @@ private:
         ) {
             *newIt = *oldIt;
         }
+        newMappedBufferGroup.objectCount = oldMappedBuffer.objectCount;
 
         m_MappedBuffers[bufferToResize] = newMappedBufferGroup;
     }

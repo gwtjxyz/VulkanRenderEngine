@@ -60,14 +60,7 @@ constexpr int32_t wrapTDefault = wrapTRepeat;
 }
 
 // Minimal number of extensions supported at first
-auto supportedExtensions = fastgltf::Extensions::None;
-
-// Simple, minimal data format for now - TODO expand
-struct Attribute {
-    glm::vec3 position;
-    glm::vec3 normal;
-    glm::vec2 texcoord0;
-};
+auto supportedExtensions = fastgltf::Extensions::KHR_materials_pbrSpecularGlossiness;
 
 // Assume decomposed transforms because we use the parsing option to guarantee it
 SceneGraphTypes::Transform extractLocalTransform(const fastgltf::Node & node) {
@@ -125,6 +118,8 @@ public:
         auto asset = m_Parser.loadGltf(data.get(), path.parent_path(), parsingOptions);
         if (auto error = asset.error(); error != fastgltf::Error::None) {
             // Some error occurred while reading the buffer, parsing the JSON, or validating the data
+            std::cerr << "Error parsing glTF asset " << path << " : " << fastgltf::getErrorName(error) <<
+                " : " << fastgltf::getErrorMessage(error) << std::endl;
             return {};
         }
 
@@ -142,7 +137,7 @@ public:
             scene.materials.emplace_back(glm::vec4(1.0f, 0.25f, 1.0f, 1.0f));
         }
 
-        std::vector<Attribute> attributesToStore; // we will turn this into a Vulkan buffer later
+        std::vector<SceneGraphTypes::Attribute> attributesToStore; // we will turn this into a Vulkan buffer later
         std::vector<uint32_t> indicesToStore;
         attributesToStore.resize(0);
         indicesToStore.resize(0);
@@ -179,7 +174,7 @@ public:
                 auto & posAccessor = asset->accessors[positionAttrib->accessorIndex];
                 auto & normAccessor = asset->accessors[normalAttrib->accessorIndex];
 
-                // Assume there's the same amount of POSITION/NORMAL/TEXCOORD_0 values
+                // Assume there's the same amount of POSITION/NORMAL/TEXCOORD_0 values (TODO add assertion for this)
                 attributesToStore.resize(oldAttributesSize + posAccessor.count);
 
                 // TODO use fastgltf's glm stuff?
@@ -243,14 +238,14 @@ public:
 
         auto * vulkanResourceService = VulkanResourceServiceLocator::locate();
         scene.vertexBuffer = vulkanResourceService->createVulkanBuffer(
-            attributesToStore.size() * sizeof(Attribute),
+            attributesToStore.size() * sizeof(SceneGraphTypes::Attribute),
             vk::BufferUsageFlagBits::eVertexBuffer,
             attributesToStore.data()
         );
         scene.indexBuffer = vulkanResourceService->createVulkanBuffer(
             indicesToStore.size() * sizeof(uint32_t),
-            vk::BufferUsageFlagBits::eVertexBuffer,
-            attributesToStore.data()
+            vk::BufferUsageFlagBits::eIndexBuffer,
+            indicesToStore.data()
         );
 
         // Traverse and load node tree

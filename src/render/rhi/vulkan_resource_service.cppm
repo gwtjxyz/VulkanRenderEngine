@@ -41,7 +41,8 @@ export struct VulkanBufferData {
     vk::DeviceMemory bufferMemory = nullptr;
 };
 
-export struct VulkanShaderBufferData {
+// https://docs.vulkan.org/samples/latest/samples/extensions/buffer_device_address/README.html
+export struct VulkanBDABufferData {
     vk::Buffer buffer = nullptr;
     vk::DeviceMemory bufferMemory = nullptr;
     void * mappedMemory = nullptr;
@@ -147,17 +148,19 @@ public:
         return bufferData;
     }
 
-    template<typename T>
-    VulkanShaderBufferData createShaderBuffer(const uint32_t objectCount) const {
-        return createShaderBuffer(objectCount * sizeof(T));
+    template <typename T>
+    VulkanBDABufferData createBDABuffer(const uint32_t objectCount) const {
+        return createBDABuffer(objectCount * sizeof(T));
     }
 
-    VulkanShaderBufferData createShaderBuffer(const vk::DeviceSize bufferSize) const {
+    VulkanBDABufferData createBDABuffer(const vk::DeviceSize bufferSize) const {
         vk::Buffer buffer;
         vk::DeviceMemory bufferMemory;
+
+        // Needs transfer src and dst bits because it's supposed to be expandable
         createBuffer(
             bufferSize,
-            vk::BufferUsageFlagBits::eShaderDeviceAddress,
+            vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
             buffer,
             bufferMemory
@@ -169,7 +172,7 @@ public:
         };
         vk::DeviceAddress bufferDeviceAddress = m_Instance->getDevice().getBufferAddress(deviceAddressInfo);
 
-        return VulkanShaderBufferData {
+        return VulkanBDABufferData {
             buffer,
             bufferMemory,
             mappedMemory,
