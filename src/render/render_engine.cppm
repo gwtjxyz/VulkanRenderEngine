@@ -312,6 +312,7 @@ private:
         }
 
         m_ResourceManager.unloadAll();
+        m_AssetManager.destroyAll();
 
         ImGui_ImplVulkan_Shutdown();
         ImGui_ImplGlfw_Shutdown();
@@ -475,7 +476,7 @@ private:
         ImGui::Text("Esc to show/hide mouse, Q to exit, R to reload shaders");
         ImGui::Spacing();
 
-        if (ImGui::CollapsingHeader("Shader Controls")) {
+        if (ImGui::CollapsingHeader("Shader Controls", ImGuiTreeNodeFlags_DefaultOpen)) {
             const char * lightingModeLabel;
             switch (m_LightMode) {
                 case LightMode::Off:
@@ -521,7 +522,52 @@ private:
             }
         }
 
+        ImGui::Spacing();
+
+        // Object picker dropdown
+        if (ImGui::CollapsingHeader("Scene Controls", ImGuiTreeNodeFlags_DefaultOpen)) {
+            static int selectedObject = -1;
+            static int previouslySelectedObject = selectedObject;
+            ImGui::Combo("Object", &selectedObject, m_EntitySystem.getObjectNames().data(), m_EntitySystem.getObjectNames().size());
+            if (selectedObject != -1) {
+                // Need to display controls for changing object's transform
+                auto objectName = m_EntitySystem.getObjectNames().at(selectedObject);
+                auto transform = m_EntitySystem.getTransformForObject(objectName);
+                assert(transform);
+
+                static float transformPosWidgetData[3] {};
+                static float transformScaleWidgetData {};
+                if (previouslySelectedObject != selectedObject) {
+                    transformPosWidgetData[0] = transform->position.x;
+                    transformPosWidgetData[1] = transform->position.y;
+                    transformPosWidgetData[2] = transform->position.z;
+
+                    transformScaleWidgetData = transform->scale.x;
+
+                    previouslySelectedObject = selectedObject;
+                }
+
+                ImGui::DragFloat3("Object position", transformPosWidgetData, 0.005f, -1000.0f, 1000.0f, "%.3f");
+                ImGui::DragFloat("Object scale", &transformScaleWidgetData, 0.005f, 0.0f, 1000.0f, "%.3f");
+
+                constexpr float tolerance = 0.001f;
+                if (isDifferentEnough(transform->position.x, transformPosWidgetData[0], tolerance) ||
+                    isDifferentEnough(transform->position.y, transformPosWidgetData[1], tolerance) ||
+                    isDifferentEnough(transform->position.z, transformPosWidgetData[2], tolerance)) {
+                    m_EntitySystem.setPosition(objectName, { transformPosWidgetData[0], transformPosWidgetData[1], transformPosWidgetData[2] });
+                    }
+                if (isDifferentEnough(transform->scale.x, transformScaleWidgetData, tolerance)) {
+                    m_EntitySystem.setScale(objectName, transformScaleWidgetData);
+                }
+            }
+        }
+
         ImGui::End();
+    }
+
+    // TODO probably extract to somewhere
+    bool isDifferentEnough(float a, float b, float tolerance) {
+        return std::fabsf(a - b) >= tolerance;
     }
 
     void advanceDeltaTime() {
@@ -1374,12 +1420,17 @@ private:
             glfwWaitEvents();
         }
 
-        m_PipelineManager->clearAll();
-
         m_Instance.getDevice().waitIdle();
+
+        m_PipelineManager->clearAll();
 
         cleanupSwapChain();
         createSwapChain();
+
+        createGraphicsPipeline();
+        createPointGraphicsPipeline();
+        createComputePipeline();
+
         cleanupColorResources();
         createColorResources();
         cleanupDepthResources();

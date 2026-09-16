@@ -46,8 +46,12 @@ public:
 
         auto & roomMesh = roomEntity.get_mut<CMesh>();
         auto * vikingRoomAssetHandle = assetManager.getOrCreateAsset(VIKING_ROOM_MODEL_NAME);
+        assert(vikingRoomAssetHandle);
         vikingRoomAssetHandle->load();
         roomMesh.asset = vikingRoomAssetHandle;
+
+        // TODO remove - temporary
+        m_WorldObjects.emplace_back(VIKING_ROOM_ENTITY_NAME.c_str());
 
         // Terrain
         auto terrainEntity = m_World.entity(TERRAIN_ENTITY_NAME.c_str()).is_a(m_ObjectPrefab);
@@ -57,8 +61,27 @@ public:
 
         auto & terrainMesh = terrainEntity.get_mut<CMesh>();
         auto * terrainAssetHandle = assetManager.getOrCreateAsset(TERRAIN_MODEL_NAME);
+        assert(terrainAssetHandle);
         terrainAssetHandle->load();
         terrainMesh.asset = terrainAssetHandle;
+
+        // TODO remove - temporary
+        m_WorldObjects.emplace_back(TERRAIN_ENTITY_NAME.c_str());
+
+        // Castle on hills (TODO change/remove - temp setup for testing for now)
+        auto castleEntity = m_World.entity(CASTLE_ENTITY_NAME.c_str()).is_a(m_ObjectPrefab);
+        auto & castleTransform = castleEntity.get_mut<CTransform>();
+        castleTransform.position = { -6.0f, -11.5f, -13.0f };
+        castleTransform.scale = glm::vec3(1.0f);
+
+        auto & castleMesh = castleEntity.get_mut<CMesh>();
+        auto * castleAssetHandle = assetManager.getOrCreateAsset(CASTLE_MODEL_NAME);
+        assert(castleAssetHandle);
+        castleAssetHandle->load();
+        castleMesh.asset = castleAssetHandle;
+
+        // TODO remove - temporary
+        m_WorldObjects.emplace_back(CASTLE_ENTITY_NAME.c_str());
 
         // Light source
         auto light = m_World.entity(LIGHT_ENTITY_NAME.c_str()).is_a(m_LightPrefab);
@@ -78,11 +101,29 @@ public:
         m_RenderSystem.run();
     }
 
-    void setPosition(const std::string & entityName, glm::vec3 pos) {
+    void setPosition(const std::string & entityName, const glm::vec3 pos) const {
         auto entity = m_World.lookup(entityName.c_str());
         auto * t = entity.try_get_mut<CTransform>();
         if (t) {
             t->position = pos;
+            t->dirty = true;
+        }
+    }
+
+    void setPosition(const char * entityName, const glm::vec3 newPos) const {
+        const auto entity = m_World.lookup(entityName);
+        auto * t = entity.try_get_mut<CTransform>();
+        if (t) {
+            t->position = newPos;
+            t->dirty = true;
+        }
+    }
+
+    void setScale(const char * entityName, const float newScale) const {
+        const auto entity = m_World.lookup(entityName);
+        auto * t = entity.try_get_mut<CTransform>();
+        if (t) {
+            t->scale = {newScale, newScale, newScale};
             t->dirty = true;
         }
     }
@@ -96,6 +137,15 @@ public:
             t->rotateZ(rotZ);
             t->dirty = true;
         }
+    }
+
+    const std::vector<const char *> & getObjectNames() const {
+        return m_WorldObjects;
+    }
+
+    const CTransform * getTransformForObject(const char * objectName) const {
+        const auto entity = m_World.lookup(objectName);
+        return entity.try_get<CTransform>();
     }
 
 private:
@@ -191,4 +241,6 @@ private:
     flecs::system m_ObjectPrepareSystem;
     flecs::system m_LightPrepareSystem;
     flecs::system m_RenderSystem;
+
+    std::vector<const char *> m_WorldObjects {};
 };

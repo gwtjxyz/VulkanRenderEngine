@@ -176,9 +176,9 @@ public:
         m_VertexPushConstants.drawIndex = drawData.drawIndex;
         bindVertexPushConstants();
 
-        m_ActiveCommandBuffer.bindVertexBuffers(0, drawData.vertexBuffer, { drawData.vertexOffset });
+        m_ActiveCommandBuffer.bindVertexBuffers(0, drawData.vertexBuffer, { drawData.vertexOffsetBytes });
         m_ActiveCommandBuffer.bindIndexBuffer(drawData.indexBuffer, 0, vk::IndexType::eUint32);
-        m_ActiveCommandBuffer.drawIndexed(drawData.indexCount, 1, drawData.firstIndex, drawData.vertexOffset, 0);
+        m_ActiveCommandBuffer.drawIndexed(drawData.indexCount, 1, drawData.firstIndex, 0, 0);
     }
 
     void registerPipeline(const std::string & pipelineName) {
