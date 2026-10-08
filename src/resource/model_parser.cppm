@@ -31,7 +31,6 @@ import vulkan;
 #endif
 
 import device_mapper;
-import render_types;
 export import scene_graph_types;
 import bit_flags;
 import vulkan_resource_service;
@@ -129,8 +128,13 @@ public:
         // Load materials
         // TODO expand - this is very basic for now
         for (auto & mat : asset->materials) {
-            auto & color = mat.pbrData.baseColorFactor;
-            scene.materials.emplace_back(glm::vec4(color.x(), color.y(), color.z(), color.w()));
+            if (mat.specularGlossiness) {
+                auto & color = mat.specularGlossiness->diffuseFactor;
+                scene.materials.emplace_back(glm::vec4(color.x(), color.y(), color.z(), color.w()));
+            } else {
+                auto & color = mat.pbrData.baseColorFactor;
+                scene.materials.emplace_back(glm::vec4(color.x(), color.y(), color.z(), color.w()));
+            }
         }
         // Add dummy material in case there are none in the model
         if (scene.materials.empty()) {
@@ -294,49 +298,53 @@ public:
 
     std::optional<SceneGraphAsset> loadObj(const std::filesystem::path & path) {
         auto startTime = std::chrono::steady_clock::now();
+        auto modelDirectory = path.parent_path();
 
         tinyobj::attrib_t attrib;
         std::vector<tinyobj::shape_t> shapes;
         // TODO support loading materials
         std::vector<tinyobj::material_t> materials;
         std::string warn, err;
-        std::unordered_map<Vertex, uint32_t> uniqueVertices {};
+        std::unordered_map<SceneGraphTypes::Attribute, uint32_t> uniqueVertices {};
 
-        std::vector<Vertex> vertices;
+        std::vector<SceneGraphTypes::Attribute> vertices;
         std::vector<uint32_t> indices;
 
         // TODO wchar support?
-        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, path.string().c_str())) {
-            std::println("Error loading OBJ model from path {}: {} {}", path.string(), warn, err);
-            return {};
+        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, path.string().c_str()), modelDirectory.string().c_str()) {
+            if (!err.empty()) {
+                std::println("Error loading OBJ model from path {}: {} {}", path.string(), warn, err);
+                return {};
+            }
+            std::println("Warning while loading OBJ model from path {}: {}; Proceeding with loading...", path.string(), warn);
         }
 
         for (const auto & shape : shapes) {
             for (const auto & index : shape.mesh.indices) {
-                Vertex vertex {};
-                vertex.pos = {
+                SceneGraphTypes::Attribute attributeToStore {};
+                attributeToStore.position = {
                     attrib.vertices[3 * index.vertex_index],
                     attrib.vertices[3 * index.vertex_index + 1],
                     attrib.vertices[3 * index.vertex_index + 2]
                 };
 
                 // OBJ assumes 0 = bottom of the image, but Vulkan works with 0 = top of the image, so we flip y coord
-                vertex.texCoord = {
+                attributeToStore.texcoord0 = {
                     attrib.texcoords[2 * index.texcoord_index],
                     1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
                 };
-                vertex.normal = {
+                attributeToStore.normal = {
                     attrib.normals[3 * index.normal_index],
                     attrib.normals[3 * index.normal_index + 1],
                     attrib.normals[3 * index.normal_index + 2]
                 };
 
-                if (!uniqueVertices.contains(vertex)) {
-                    uniqueVertices[vertex] = static_cast<uint32_t>(vertices.size());
-                    vertices.push_back(vertex);
+                if (!uniqueVertices.contains(attributeToStore)) {
+                    uniqueVertices[attributeToStore] = static_cast<uint32_t>(vertices.size());
+                    vertices.push_back(attributeToStore);
                 }
 
-                indices.push_back(uniqueVertices[vertex]);
+                indices.push_back(uniqueVertices[attributeToStore]);
             }
         }
 
@@ -363,7 +371,31 @@ public:
         scene.rootIndices.emplace_back(0);
 
         // Add one material
+        // Assume an OBJ file only has up to a single material defined for simplicity
+        // (for more complex material structures we will use GLTF)
         SceneGraphTypes::Material material {};
+
+        if (!materials.empty()) {
+            auto & mat = materials[0];
+            material.color.x = mat.diffuse[0];
+            material.color.y = mat.diffuse[1];
+            material.color.z = mat.diffuse[2];
+            material.color.w = 1.0f;
+            // Set texture if texture name exists
+            if (!mat.diffuse_texname.empty()) {
+                material.texturePath = mat.diffuse_texname;
+            }
+        } else {
+            // Scan the model directory for textures that could be used
+            auto possiblePngTexturePath = modelDirectory / (path.stem().string() + ".png");
+            auto possibleJpgTexturePath = modelDirectory / (path.stem().string() + ".jpg");
+            if (std::filesystem::exists(possiblePngTexturePath)) {
+                material.texturePath = possiblePngTexturePath;
+            }
+            if (std::filesystem::exists(possibleJpgTexturePath)) {
+                material.texturePath = possibleJpgTexturePath;
+            }
+        }
         scene.materials.emplace_back(material);
 
         // Add one primitive

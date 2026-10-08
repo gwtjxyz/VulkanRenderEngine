@@ -31,6 +31,8 @@ import bit_flags;
 import device_mapper;
 import render_types;
 import core_types;
+import platform;
+import texture_manager;
 import vulkan_resource_service;
 
 namespace SceneGraphTypes {
@@ -85,6 +87,10 @@ export struct Attribute {
     glm::vec3 position;
     glm::vec3 normal;
     glm::vec2 texcoord0;
+
+    bool operator==(const Attribute & other) const {
+        return position == other.position && normal == other.normal && texcoord0 == other.texcoord0;
+    }
 };
 
 // Forward declaration
@@ -133,6 +139,7 @@ export struct DrawCallData {
 // Keep it simple for now, expand later
 struct Material {
     glm::vec4 color { 1.0f, 1.0f, 1.0f, 1.0f };
+    std::filesystem::path texturePath {};
 };
 
 struct Scene {
@@ -155,6 +162,13 @@ struct Scene {
     }
 };
 }
+
+export template <>
+struct std::hash<SceneGraphTypes::Attribute> {
+    size_t operator()(SceneGraphTypes::Attribute const & attribute) const noexcept {
+        return ((hash<glm::vec3>()(attribute.position) ^ (hash<glm::vec3>()(attribute.normal) << 1)) << 1) ^ (hash<glm::vec2>()(attribute.texcoord0) << 1);
+    }
+};
 
 export class SceneGraphAsset {
 private:
@@ -193,11 +207,20 @@ public:
         m_MaterialMap.clear();
 
         uint32_t materialGraphIndex = 0;
+
+        auto * textureManager = TextureManagerLocator::locate();
         for (auto & mat : m_Scene.materials) {
-            // TODO update once we support textures in here
             device_index materialDeviceIndex = m_DeviceMapper->addMaterial(mat.color, INDEX_UNSET);
             m_MaterialMap.insert_or_assign(materialGraphIndex, materialDeviceIndex);
             m_DeviceMapper->getMaterial(materialDeviceIndex)->layout.materialTint = mat.color;
+
+            // TODO add support for reusing textures across assets
+            device_index textureIndex = INDEX_UNSET;
+            // TODO: for now we assume all textures are sampled the same way, maybe change later?
+            if (!mat.texturePath.empty()) {
+                textureIndex = textureManager->load(mat.texturePath, materialDeviceIndex);
+                m_DeviceMapper->getMaterial(materialDeviceIndex)->layout.textureIndex = textureIndex;
+            }
 
             materialGraphIndex++;
         }
@@ -238,11 +261,14 @@ public:
 
         m_Loaded = false;
 
+        auto * textureManager = TextureManagerLocator::locate();
+
         for (const auto & drawEntry : m_DrawMap | std::views::values) {
             m_DeviceMapper->removeDraw(drawEntry);
         }
         m_DrawMap.clear();
         for (const auto & materialEntry : m_MaterialMap | std::views::values) {
+            textureManager->unload(materialEntry);
             m_DeviceMapper->removeMaterial(materialEntry);
         }
         m_MaterialMap.clear();

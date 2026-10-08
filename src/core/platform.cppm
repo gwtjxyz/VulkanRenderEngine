@@ -23,12 +23,6 @@ import std;
 
 const std::string PROJECT_DIR = "VulkanHppTutorial"; // TODO un-hardcode?
 
-export struct FileInfo {
-    std::string name;
-    std::string extension;
-    std::filesystem::path absolutePath;
-};
-
 export std::filesystem::path pathFromProjectDir(const std::string & relativePath) {
     auto currentPath = std::filesystem::current_path();
     while (currentPath.filename() != std::filesystem::path(PROJECT_DIR)) {
@@ -42,14 +36,6 @@ export std::filesystem::path pathFromProjectDir(const std::string & relativePath
 
 export std::filesystem::path pathFromAssetDir(const std::string & relativePath) {
     return pathFromProjectDir("assets/" + relativePath);
-}
-
-export FileInfo getFileInfo(const std::string & relativePath) {
-    auto absolutePath = pathFromProjectDir(relativePath);
-    auto extension = absolutePath.extension().string();
-    auto name = absolutePath.stem().string();
-
-    return { name, extension, absolutePath };
 }
 
 export std::vector<char> readFile(const std::string & filename) {
@@ -70,8 +56,8 @@ export std::vector<char> readFile(const std::string & filename) {
 
 export class StbImageWrapper {
 public:
-    explicit StbImageWrapper(FileInfo & fileInfo) {
-        load(fileInfo.absolutePath, fileInfo.extension);
+    explicit StbImageWrapper(const std::filesystem::path & absolutePath) {
+        load(absolutePath);
     }
 
     ~StbImageWrapper() {
@@ -90,6 +76,10 @@ public:
     StbImageWrapper & operator=(StbImageWrapper && other) = delete;
 
 private:
+    void load(const std::filesystem::path & absolutePath) {
+        return load(absolutePath, absolutePath.extension().string());
+    }
+
     void load(const std::filesystem::path & absolutePath, const std::string & extension) {
         // Will expand this logic as necessary, for now just png and jpeg is enough
         int desiredChannels;

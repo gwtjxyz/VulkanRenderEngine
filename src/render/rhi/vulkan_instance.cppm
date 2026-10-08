@@ -305,6 +305,8 @@ private:
             features.get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters &&
             features.get<vk::PhysicalDeviceVulkan12Features>().shaderSampledImageArrayNonUniformIndexing &&
             features.get<vk::PhysicalDeviceVulkan12Features>().descriptorBindingVariableDescriptorCount &&
+            features.get<vk::PhysicalDeviceVulkan12Features>().descriptorBindingSampledImageUpdateAfterBind &&
+            features.get<vk::PhysicalDeviceVulkan12Features>().descriptorBindingPartiallyBound &&
             features.get<vk::PhysicalDeviceVulkan12Features>().runtimeDescriptorArray &&
             features.get<vk::PhysicalDeviceVulkan12Features>().bufferDeviceAddress &&
             features.get<vk::PhysicalDeviceVulkan12Features>().descriptorIndexing &&
@@ -352,6 +354,8 @@ private:
             {
                 .descriptorIndexing = true,                                     // Enable descriptor indexing for "bindless" uniforms
                 .shaderSampledImageArrayNonUniformIndexing = true,
+                .descriptorBindingSampledImageUpdateAfterBind = true,
+                .descriptorBindingPartiallyBound = true,
                 .descriptorBindingVariableDescriptorCount = true,
                 .runtimeDescriptorArray = true,
                 .timelineSemaphore = true,
