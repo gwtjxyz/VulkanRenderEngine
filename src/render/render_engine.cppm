@@ -29,13 +29,14 @@ import camera;
 import constants;
 import components;
 import entity_system;
+import descriptor_manager;
 import device_mapper;
 import hlsl_compiler;
 import model_parser;
 import pipeline_manager;
 import platform;
 import render_types;
-import resource;
+import texture_manager;
 import vulkan_instance;
 import vulkan_resource_service;
 
@@ -77,12 +78,16 @@ private:
     void initServices() {
         m_VulkanResourceService = std::make_shared<VulkanResourceService>();
         VulkanResourceServiceLocator::provide(m_VulkanResourceService.get());
+        m_DescriptorManager = std::make_shared<DescriptorManager>();
+        DescriptorManagerLocator::provide(m_DescriptorManager.get());
         m_PipelineManager = std::make_shared<PipelineManager>();
         PipelineManagerLocator::provide(m_PipelineManager.get());
         m_DeviceMapper = std::make_shared<DeviceMapper>();
         DeviceMapperLocator::provide(m_DeviceMapper.get());
         m_ModelParser = std::make_shared<ModelParser>();
         ModelParserLocator::provide(m_ModelParser.get());
+        m_TextureManager = std::make_shared<TextureManager>();
+        TextureManagerLocator::provide(m_TextureManager.get());
     }
 
     void initWindow(const std::string & appName) {
@@ -193,13 +198,15 @@ private:
         // Pipeline draw data
         m_DeviceMapper->preallocateBuffers(100, MAX_FRAMES_IN_FLIGHT);
 
+        // Descriptor set layout
+        m_DescriptorManager->setVulkanInstance(&m_Instance);
+        m_DescriptorManager->initialize();
+
         // Load assets
+        m_TextureManager->initialize();
         loadEntities();
 
         // Pipeline layout setup
-        createDescriptorSetLayout();
-        createDescriptorPool();
-        createDescriptorSets();
         createGraphicsPipeline();
 
         createComputePipeline();
@@ -304,14 +311,14 @@ private:
 
         cleanupDepthResources();
         cleanupColorResources();
-        m_VulkanResourceService->freeResources(m_TextureSampler);
         m_DeviceMapper->freeResources();
 
         for (auto & computeDataBuffer : m_ComputeDataBuffers) {
             m_VulkanResourceService->freeResources(computeDataBuffer.buffer, computeDataBuffer.bufferMemory);
         }
 
-        m_ResourceManager.unloadAll();
+        m_DescriptorManager->uninitialize();
+        m_TextureManager->unloadAll();
         m_AssetManager.destroyAll();
 
         ImGui_ImplVulkan_Shutdown();
@@ -762,47 +769,6 @@ private:
         ImGui_ImplVulkan_Init(&initInfo);
     }
 
-    // We are only using this for textures
-    // TODO also use this for other global buffers we could index into?
-    void createDescriptorSetLayout() {
-        std::array bindings = {
-            vk::DescriptorSetLayoutBinding(
-                0,
-                vk::DescriptorType::eSampler,
-                1,
-                vk::ShaderStageFlagBits::eFragment,
-                nullptr
-            ),
-            vk::DescriptorSetLayoutBinding(
-                1,
-                vk::DescriptorType::eSampledImage,
-                m_ResourceManager.getResourceTypeCount<Texture>(),
-                vk::ShaderStageFlagBits::eFragment,
-                nullptr
-            )
-        };
-
-        std::array bindingFlags = {
-            vk::DescriptorBindingFlags {},
-            vk::DescriptorBindingFlags {
-                vk::DescriptorBindingFlagBits::eVariableDescriptorCount
-            }
-        };
-
-        vk::DescriptorSetLayoutBindingFlagsCreateInfo bindingFlagsInfo = {
-            .bindingCount = bindingFlags.size(),
-            .pBindingFlags = bindingFlags.data(),
-        };
-
-        vk::DescriptorSetLayoutCreateInfo layoutInfo = {
-            .pNext = &bindingFlagsInfo,
-            .bindingCount = static_cast<uint32_t>(bindings.size()),
-            .pBindings = bindings.data()
-        };
-
-        m_TextureDescriptorSetLayout = vk::raii::DescriptorSetLayout(m_Instance.getRaiiDevice(), layoutInfo);
-    }
-
     void createComputePipeline() {
         auto [csShaderModule, csShaderStageInfo] = m_ShaderCompiler.compileAndGetCreateInfo(
             m_Instance.getRaiiDevice(),
@@ -916,9 +882,10 @@ private:
             .size = PipelineManager::getVertexPushConstantsSize()
         };
 
+        vk::DescriptorSetLayout descriptorSetLayout = m_DescriptorManager->getDescriptorSetLayout();
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo {
             .setLayoutCount = 1,                                    // # of descriptor set layouts
-            .pSetLayouts = &*m_TextureDescriptorSetLayout,                 // Pointer to descriptor set layouts
+            .pSetLayouts = &descriptorSetLayout,                 // Pointer to descriptor set layouts
             .pushConstantRangeCount = 1,                            // # of push constant ranges
             .pPushConstantRanges = &pushConstantRange               // Pointer to push constant ranges
         };
@@ -958,9 +925,9 @@ private:
         );
         m_PipelineManager->setDescriptorInfoForPipeline(
             GRAPHICS_PIPELINE_NAME,
-            m_DescriptorPool,
-            m_TextureDescriptorSetLayout,
-            m_TextureDescriptorSet
+            m_DescriptorManager->getDescriptorPool(),
+            m_DescriptorManager->getDescriptorSetLayout(),
+            m_DescriptorManager->getTextureDescriptorSet()
         );
     }
 
@@ -1112,9 +1079,7 @@ private:
         m_EntitySystem.setupWorld(m_AssetManager);
         m_AssetManager.loadAll();
 
-        // TODO remove - temporary
-        m_ResourceManager.load<Texture>(VIKING_ROOM_TEXTURE_NAME);
-        m_ResourceManager.load<Texture>(TERRAIN_TEXTURE_NAME);
+        m_DescriptorManager->writeToDescriptors();
     }
 
     void createComputeBuffers() {
@@ -1142,87 +1107,6 @@ private:
         }
 
         m_ComputeDataBuffers = m_VulkanResourceService->createComputeBuffers(MAX_FRAMES_IN_FLIGHT, particles);
-    }
-
-    void createDescriptorPool() {
-        // One texture = one descriptor to allocate
-        // Size is important because trying to allocate descriptors beyond the requested count will fail
-        std::array poolSize = {
-            vk::DescriptorPoolSize(
-                vk::DescriptorType::eSampler,
-                1
-            ),
-            vk::DescriptorPoolSize(
-                vk::DescriptorType::eSampledImage,
-                m_ResourceManager.getResourceTypeCount<Texture>()
-            ),
-        };
-        // Only using descriptors for textures = no need to allocate one set per max frames in flight
-        vk::DescriptorPoolCreateInfo poolInfo = {
-            .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
-            .maxSets = 1,
-            .poolSizeCount = static_cast<uint32_t>(poolSize.size()),
-            .pPoolSizes = poolSize.data()
-        };
-        m_DescriptorPool = vk::raii::DescriptorPool(m_Instance.getRaiiDevice(), poolInfo);
-    }
-
-    void createDescriptorSets() {
-        uint32_t variableDescCount = m_ResourceManager.getResourceTypeCount<Texture>();
-        vk::DescriptorSetVariableDescriptorCountAllocateInfo variableDescCountAllocInfo = {
-            .descriptorSetCount = 1,
-            .pDescriptorCounts = &variableDescCount
-        };
-        vk::DescriptorSetAllocateInfo textureDescriptorSetAllocInfo = {
-            .pNext = &variableDescCountAllocInfo,
-            .descriptorPool = m_DescriptorPool,
-            .descriptorSetCount = 1,
-            .pSetLayouts = &*m_TextureDescriptorSetLayout
-        };
-        m_TextureDescriptorSet.clear();
-        m_TextureDescriptorSet = std::move(m_Instance.getRaiiDevice().allocateDescriptorSets(textureDescriptorSetAllocInfo).front());
-
-        // For more than one texture, existing textures need to be collected into an array and written from there
-        // TODO make something more robust
-        std::array textures = {
-            m_ResourceManager.getResource<Texture>(VIKING_ROOM_TEXTURE_NAME),
-            m_ResourceManager.getResource<Texture>(TERRAIN_TEXTURE_NAME)
-        };
-
-        std::vector<vk::DescriptorImageInfo> textureDescriptors {};
-        for (auto i = 0; i < variableDescCount; ++i) {
-            vk::DescriptorImageInfo imageInfo = {
-                .imageView = textures[i]->getImageView(),
-                .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
-            };
-            textures[i]->setIndex(i);
-
-            textureDescriptors.push_back(imageInfo);
-        }
-
-        m_TextureSampler = m_VulkanResourceService->createTextureSampler();
-        vk::DescriptorImageInfo samplerDescriptor = {
-            .sampler = m_TextureSampler
-        };
-
-        std::array writeDescriptorSets = {
-            vk::WriteDescriptorSet {
-                .dstSet = m_TextureDescriptorSet,
-                .dstBinding = 0,
-                .descriptorCount = 1,
-                .descriptorType = vk::DescriptorType::eSampler,
-                .pImageInfo = &samplerDescriptor
-            },
-            vk::WriteDescriptorSet {
-                .dstSet = m_TextureDescriptorSet,
-                .dstBinding = 1,
-                .descriptorCount = static_cast<uint32_t>(textureDescriptors.size()),
-                .descriptorType = vk::DescriptorType::eSampledImage,
-                .pImageInfo = textureDescriptors.data()
-            }
-        };
-
-        m_Instance.getRaiiDevice().updateDescriptorSets(writeDescriptorSets, {});
     }
 
     void createCommandBuffers() {
@@ -1453,11 +1337,11 @@ private:
 private:
     std::shared_ptr<VulkanResourceService> m_VulkanResourceService = nullptr;
     std::shared_ptr<DeviceMapper> m_DeviceMapper = nullptr;
+    std::shared_ptr<DescriptorManager> m_DescriptorManager = nullptr;
     std::shared_ptr<PipelineManager> m_PipelineManager = nullptr;
     std::shared_ptr<ModelParser> m_ModelParser = nullptr;
+    std::shared_ptr<TextureManager> m_TextureManager = nullptr;
 
-
-    ResourceManager m_ResourceManager {};
     AssetManager m_AssetManager {};
     HlslShaderCompiler m_ShaderCompiler {};
     EntitySystem m_EntitySystem {};
@@ -1492,7 +1376,6 @@ private:
     vk::raii::PipelineLayout m_ComputePipelineLayout = nullptr;
     vk::raii::Pipeline m_ComputePipeline = nullptr;
 
-    vk::raii::DescriptorSetLayout m_TextureDescriptorSetLayout = nullptr;
     vk::raii::PipelineLayout m_GraphicsPipelineLayout = nullptr;
     vk::raii::Pipeline m_GraphicsPipeline = nullptr;
 
@@ -1517,11 +1400,6 @@ private:
 
     std::vector<VulkanComputeBufferData> m_ComputeDataBuffers {};
     ComputePushConstants m_ComputePushConstants {};
-
-    vk::raii::DescriptorPool m_DescriptorPool = nullptr;
-    vk::raii::DescriptorSet m_TextureDescriptorSet = nullptr;
-
-    vk::Sampler m_TextureSampler = nullptr;
 
     vk::Image m_DepthImage = nullptr;
     vk::DeviceMemory m_DepthImageMemory = nullptr;
