@@ -2,10 +2,11 @@
 
 ## Current priority
 
-- Better asset management
-- Different asset formats (KTX, GLTF, etc)
-- Architecture work
-- ECS integration
+- Cooler shading models (BRDF perhaps?)
+- Explore various other rendering techniques
+- Look into improving performance
+- Better logging and tracking what took how much time
+- Skybox
 
 ## Backlog
 
@@ -20,12 +21,8 @@
 ### Resource system
 - Async resource manager
 - Resource streaming
-- Placeholder textures/models (for when something fails to load)
+- Placeholder models (for when something fails to load)
 - Resource hot reloading
-
-### Entity Component system
-- Rewrite camera as an Entity with a Camera component
-- EntityManager
 
 ### Rendering
 - Implement culling
@@ -35,6 +32,10 @@
 - Shader hot reloading
 - Movable camera
 - Basic asset loading
+- flecs and fastgltf integration
+- glTF loading
 - imgui integration for tracking application state (variables, FPS, etc)
 - Extracting code out of main.cpp and into separate modules
 - Bindless textures using descriptor indexing and buffer device address extensions
+- Bindless transform, material and light access
+- Placeholder textures

@@ -14,17 +14,20 @@ doesn't use standard library modules, because its stdlib has no support for them
 
 - Resource system for textures and models
 - Interactive 3D camera
-- Basic lighting model
+- Basic lighting models: Phong and Gooch
 - Shader hot reloading
-- Bindless texture access
-- Interactive UI
+- Bindless data access (transforms, materials, lights)
+- Semi-bindless textures (descriptor indexing)
+- Interactive UI with object picking
+- OBJ and glTF model loading
 - Compute particles
 - HLSL shader compiler
 
-For a more comprehensive list of planned and implemented features, check the [To-Do list](ToDoList.md) file.
+For a more comprehensive (but still not fully up-to-date) list of planned and implemented features,
+check the [To-Do list](ToDoList.md) file.
 
 ## Examples
 
-![image](readme/vulkan.png)
+![image](readme/models.png)
 
 ![image](readme/particles.png)

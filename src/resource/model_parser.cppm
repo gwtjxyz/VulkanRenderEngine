@@ -165,8 +165,8 @@ public:
                 }
 
                 // Required attributes: position and normal
-                auto * positionAttrib = mp.findAttribute("POSITION");
-                auto * normalAttrib = mp.findAttribute("NORMAL");
+                auto positionAttrib = mp.findAttribute("POSITION");
+                auto normalAttrib = mp.findAttribute("NORMAL");
 
                 if (positionAttrib == mp.attributes.end()) {
                     throw std::runtime_error("Unsupported glTF: POSITION attribute not defined.");
@@ -200,7 +200,7 @@ public:
                 );
 
                 // If texcoords exist, use them, otherwise fill them up with zeros
-                auto * texcoordAttrib = mp.findAttribute("TEXCOORD_0");
+                auto texcoordAttrib = mp.findAttribute("TEXCOORD_0");
                 if (texcoordAttrib != mp.attributes.end()) {
                     auto & texAccessor = asset->accessors[texcoordAttrib->accessorIndex];
 
