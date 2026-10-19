@@ -27,38 +27,6 @@ export enum class LightMode : int32_t {
     Gooch = 2
 };
 
-export struct Vertex {
-    glm::vec3 pos;
-    glm::vec3 normal;
-    glm::vec2 texCoord;
-
-    static vk::VertexInputBindingDescription getBindingDescription() {
-        return { .binding = 0, .stride = sizeof(Vertex), .inputRate = vk::VertexInputRate::eVertex };
-    }
-
-    static std::array<vk::VertexInputAttributeDescription, 3> getAttributeDescriptions() {
-        return {
-            vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, pos)),
-            vk::VertexInputAttributeDescription(1, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, normal)),
-            vk::VertexInputAttributeDescription(2, 0, vk::Format::eR32G32Sfloat, offsetof(Vertex, texCoord))
-        };
-    }
-
-    bool operator==(const Vertex & other) const {
-        return pos == other.pos && normal == other.normal && texCoord == other.texCoord;
-    }
-};
-
-// Hash function for Vertex struct
-export template <>
-struct std::hash<Vertex> {
-    size_t operator()(Vertex const & vertex) const noexcept {
-        return ((hash<glm::vec3>()(vertex.pos) ^
-                (hash<glm::vec3>()(vertex.normal) << 1)) << 1) ^
-            (hash<glm::vec2>()(vertex.texCoord) << 1);
-    }
-};
-
 // Replacement for UBOs that we address using "bindless" (buffer device address extension)
 export struct MeshData {
     alignas(16) glm::mat4 projection;
@@ -71,7 +39,6 @@ export struct LightData {
     alignas(16) glm::vec4 lightPos {};
 };
 
-// Same data layout as Vertex struct so we can use the same shader for both, even though most of this data isn't used
 export struct Particle {
     glm::vec4 position;
     glm::vec4 color;

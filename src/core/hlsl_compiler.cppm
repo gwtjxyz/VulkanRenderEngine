@@ -154,7 +154,7 @@ public:
     };
 
     // TODO specialization info support
-    ShaderInfo compileAndGetCreateInfo(const vk::raii::Device & device, const std::string & relativePath, const HlslShaderStage shaderStage) const {
+    ShaderInfo compileWithInfo(const vk::raii::Device & device, const std::string & relativePath, const HlslShaderStage shaderStage) const {
         ShaderInfo shaderInfo {};
         shaderInfo.shaderModule = compileShaderModule(device, relativePath, shaderStage);
 

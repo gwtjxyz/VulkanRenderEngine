@@ -31,7 +31,6 @@ import components;
 import entity_system;
 import descriptor_manager;
 import device_mapper;
-import hlsl_compiler;
 import model_parser;
 import pipeline_manager;
 import platform;
@@ -207,11 +206,9 @@ private:
         loadEntities();
 
         // Pipeline layout setup
-        createGraphicsPipeline();
-
-        createComputePipeline();
-
-        createPointGraphicsPipeline();
+        m_PipelineManager->createComputePipeline();
+        m_PipelineManager->createGraphicsPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
+        m_PipelineManager->createPointGraphicsPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
 
         createCommandBuffers();
         createComputeCommandBuffers();
@@ -317,9 +314,10 @@ private:
             m_VulkanResourceService->freeResources(computeDataBuffer.buffer, computeDataBuffer.bufferMemory);
         }
 
-        m_DescriptorManager->uninitialize();
-        m_TextureManager->unloadAll();
+        m_DescriptorManager->destroy();
+        m_TextureManager->destroyAll();
         m_AssetManager.destroyAll();
+        m_PipelineManager->destroyAll();
 
         ImGui_ImplVulkan_Shutdown();
         ImGui_ImplGlfw_Shutdown();
@@ -353,6 +351,7 @@ private:
         uint64_t graphicsWaitValue = computeSignalValue;
         uint64_t graphicsSignalValue = ++m_TimelineValue;
 
+        // TODO: should we have code for updating engine state inside a drawing function? Probably not, right?
         updateComputePushConstants();
         updateEntities();
 
@@ -385,6 +384,7 @@ private:
                 .pSignalSemaphores = &*m_Semaphore
             };
 
+            // TODO use separate queue for compute
             m_Instance.getGraphicsQueue().submit(computeSubmitInfo, nullptr);
         }
 
@@ -573,7 +573,7 @@ private:
     }
 
     // TODO probably extract to somewhere
-    bool isDifferentEnough(float a, float b, float tolerance) {
+    static bool isDifferentEnough(const float a, const float b, const float tolerance) {
         return std::fabsf(a - b) >= tolerance;
     }
 
@@ -581,15 +581,15 @@ private:
         static auto startTime = std::chrono::high_resolution_clock::now();
 
         auto currentTime = std::chrono::high_resolution_clock::now();
-        m_DeltaTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+        m_DeltaTime = std::chrono::duration<float>(currentTime - startTime).count();
         startTime = currentTime;
     }
 
-    void updateEntities() {
+    void updateEntities() const {
         static auto startTime = std::chrono::high_resolution_clock::now();
 
         auto currentTime = std::chrono::high_resolution_clock::now();
-        float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+        float time = std::chrono::duration<float>(currentTime - startTime).count();
 
         if (m_IsModelSpinEnabled) {
             m_EntitySystem.rotate(VIKING_ROOM_ENTITY_NAME, 0, time * 90.0f, 0.0f);
@@ -601,6 +601,7 @@ private:
         startTime = currentTime;
     }
 
+    // TODO remove / replace with other logic
     void updateComputePushConstants() {
         m_ComputePushConstants.addressThisFrame = m_ComputeDataBuffers[m_FrameIndex].bufferDeviceAddress;
         if (m_FrameIndex > 0) {
@@ -701,7 +702,7 @@ private:
                    : vk::PresentModeKHR::eFifo;
     }
 
-    vk::Extent2D chooseSwapExtent(vk::SurfaceCapabilitiesKHR const & capabilities) {
+    vk::Extent2D chooseSwapExtent(vk::SurfaceCapabilitiesKHR const & capabilities) const {
         if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
             return capabilities.currentExtent;
         }
@@ -769,293 +770,6 @@ private:
         ImGui_ImplVulkan_Init(&initInfo);
     }
 
-    void createComputePipeline() {
-        auto [csShaderModule, csShaderStageInfo] = m_ShaderCompiler.compileAndGetCreateInfo(
-            m_Instance.getRaiiDevice(),
-            "shaders/particle_compute_shader.hlsl",
-            HlslShaderStage::COMPUTE
-        );
-
-        vk::PushConstantRange pushConstantRange = {
-            .stageFlags = vk::ShaderStageFlagBits::eCompute,
-            .size = sizeof(ComputePushConstants)
-        };
-
-        vk::PipelineLayoutCreateInfo pipelineLayoutInfo = {
-            .setLayoutCount = 0,
-            .pSetLayouts = nullptr,
-            .pushConstantRangeCount = 1,
-            .pPushConstantRanges = &pushConstantRange
-        };
-        m_ComputePipelineLayout = m_Instance.getRaiiDevice().createPipelineLayout(pipelineLayoutInfo);
-
-        vk::ComputePipelineCreateInfo pipelineCreateInfo = {
-            .stage = csShaderStageInfo,
-            .layout = m_ComputePipelineLayout
-        };
-
-        m_ComputePipeline = m_Instance.getRaiiDevice().createComputePipeline(nullptr, pipelineCreateInfo);
-
-        // TODO cleanup
-        m_PipelineManager->registerPipeline(COMPUTE_PIPELINE_NAME);
-        m_PipelineManager->setInfoForPipeline(
-            COMPUTE_PIPELINE_NAME,
-            m_ComputePipeline,
-            m_ComputePipelineLayout,
-            vk::PipelineBindPoint::eCompute
-        );
-    }
-
-    void createGraphicsPipeline() {
-        auto [vsShaderModule, vsShaderStageInfo] = m_ShaderCompiler.compileAndGetCreateInfo(
-            m_Instance.getRaiiDevice(),
-            "shaders/main_shader.hlsl",
-            HlslShaderStage::VERTEX
-        );
-        auto [psShaderModule, psShaderStageInfo] = m_ShaderCompiler.compileAndGetCreateInfo(
-            m_Instance.getRaiiDevice(),
-            "shaders/main_shader.hlsl",
-            HlslShaderStage::PIXEL
-        );
-
-        auto bindingDescription = Vertex::getBindingDescription();
-        auto attributeDescriptions = Vertex::getAttributeDescriptions();
-
-        vk::PipelineVertexInputStateCreateInfo vertexInputInfo {
-            .vertexBindingDescriptionCount = 1,
-            .pVertexBindingDescriptions = &bindingDescription,
-            .vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size()),
-            .pVertexAttributeDescriptions = attributeDescriptions.data()
-        };
-        vk::PipelineShaderStageCreateInfo shaderStages[] = { vsShaderStageInfo, psShaderStageInfo };
-
-        vk::PipelineInputAssemblyStateCreateInfo inputAssembly { .topology = vk::PrimitiveTopology::eTriangleList };
-
-        std::vector<vk::DynamicState> dynamicStates = {
-            vk::DynamicState::eViewport,
-            vk::DynamicState::eScissor
-        };
-        vk::PipelineDynamicStateCreateInfo dynamicState {
-            .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()),
-            .pDynamicStates = dynamicStates.data()
-        };
-        // don't need to specify viewports and scissors now as we are going to be setting them dynamically
-        vk::PipelineViewportStateCreateInfo viewportState { .viewportCount = 1, .scissorCount = 1 };
-
-        vk::PipelineRasterizationStateCreateInfo rasterizer {
-            .depthClampEnable = vk::False,
-            .rasterizerDiscardEnable = vk::False,
-            .polygonMode = vk::PolygonMode::eFill,
-            .cullMode = vk::CullModeFlagBits::eBack,
-            .frontFace = vk::FrontFace::eCounterClockwise, // counter-clockwise since we flip the Y-axis of the projection matrix
-            .depthBiasEnable = vk::False,
-            .lineWidth = 1.0f
-        };
-
-        vk::PipelineMultisampleStateCreateInfo multisampling {
-            .rasterizationSamples = m_MsaaSamples,
-            .sampleShadingEnable = vk::False
-        };
-
-        vk::PipelineDepthStencilStateCreateInfo depthStencil {
-            .depthTestEnable = vk::True,
-            .depthWriteEnable = vk::True,
-            .depthCompareOp = vk::CompareOp::eLess,
-            .depthBoundsTestEnable = vk::False,
-            .stencilTestEnable = vk::False
-        };
-
-        vk::PipelineColorBlendAttachmentState colorBlendAttachment {
-            .blendEnable = vk::False,
-            .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA
-        };
-
-        vk::PipelineColorBlendStateCreateInfo colorBlending {
-            .logicOpEnable = vk::False,
-            .logicOp = vk::LogicOp::eCopy,
-            .attachmentCount = 1,
-            .pAttachments = &colorBlendAttachment
-        };
-
-        vk::PushConstantRange pushConstantRange = {
-            .stageFlags = vk::ShaderStageFlagBits::eVertex,
-            .size = PipelineManager::getVertexPushConstantsSize()
-        };
-
-        vk::DescriptorSetLayout descriptorSetLayout = m_DescriptorManager->getDescriptorSetLayout();
-        vk::PipelineLayoutCreateInfo pipelineLayoutInfo {
-            .setLayoutCount = 1,                                    // # of descriptor set layouts
-            .pSetLayouts = &descriptorSetLayout,                 // Pointer to descriptor set layouts
-            .pushConstantRangeCount = 1,                            // # of push constant ranges
-            .pPushConstantRanges = &pushConstantRange               // Pointer to push constant ranges
-        };
-        m_GraphicsPipelineLayout = vk::raii::PipelineLayout(m_Instance.getRaiiDevice(), pipelineLayoutInfo);
-
-        vk::Format depthFormat = m_VulkanResourceService->findDepthFormat();
-        vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo {
-            .colorAttachmentCount = 1,
-            .pColorAttachmentFormats = &m_SwapChainSurfaceFormat.format,
-            .depthAttachmentFormat = depthFormat
-        };
-        vk::GraphicsPipelineCreateInfo pipelineInfo {
-            .pNext = &pipelineRenderingCreateInfo,
-            .stageCount = 2,
-            .pStages = shaderStages,
-            .pVertexInputState = &vertexInputInfo,
-            .pInputAssemblyState = &inputAssembly,
-            .pViewportState = &viewportState,
-            .pRasterizationState = &rasterizer,
-            .pMultisampleState = &multisampling,
-            .pDepthStencilState = &depthStencil,
-            .pColorBlendState = &colorBlending,
-            .pDynamicState = &dynamicState,
-            .layout = m_GraphicsPipelineLayout,
-            .renderPass = nullptr                   // we're using dynamic rendering instead of render passes
-        };
-
-        m_GraphicsPipeline = vk::raii::Pipeline(m_Instance.getRaiiDevice(), nullptr, pipelineInfo);
-
-        // TODO clean up
-        m_PipelineManager->registerPipeline(GRAPHICS_PIPELINE_NAME);
-        m_PipelineManager->setInfoForPipeline(
-            GRAPHICS_PIPELINE_NAME,
-            m_GraphicsPipeline,
-            m_GraphicsPipelineLayout,
-            vk::PipelineBindPoint::eGraphics
-        );
-        m_PipelineManager->setDescriptorInfoForPipeline(
-            GRAPHICS_PIPELINE_NAME,
-            m_DescriptorManager->getDescriptorPool(),
-            m_DescriptorManager->getDescriptorSetLayout(),
-            m_DescriptorManager->getTextureDescriptorSet()
-        );
-    }
-
-    void createPointGraphicsPipeline() {
-        auto [vsShaderModule, vsShaderStageInfo] = m_ShaderCompiler.compileAndGetCreateInfo(
-            m_Instance.getRaiiDevice(),
-            "shaders/particle_graphics_shader.hlsl",
-            HlslShaderStage::VERTEX
-        );
-        auto [psShaderModule, psShaderStageInfo] = m_ShaderCompiler.compileAndGetCreateInfo(
-            m_Instance.getRaiiDevice(),
-            "shaders/particle_graphics_shader.hlsl",
-            HlslShaderStage::PIXEL
-        );
-
-        auto bindingDescription = Particle::getBindingDescription();
-        auto attributeDescriptions = Particle::getAttributeDescriptions();
-
-        vk::PipelineVertexInputStateCreateInfo vertexInputInfo {
-            .vertexBindingDescriptionCount = 1,
-            .pVertexBindingDescriptions = &bindingDescription,
-            .vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size()),
-            .pVertexAttributeDescriptions = attributeDescriptions.data()
-        };
-
-        vk::PipelineShaderStageCreateInfo shaderStages[] = { vsShaderStageInfo, psShaderStageInfo };
-
-        vk::PipelineInputAssemblyStateCreateInfo inputAssembly { .topology = vk::PrimitiveTopology::ePointList };
-
-        std::vector<vk::DynamicState> dynamicStates = {
-            vk::DynamicState::eViewport,
-            vk::DynamicState::eScissor
-        };
-        vk::PipelineDynamicStateCreateInfo dynamicState {
-            .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()),
-            .pDynamicStates = dynamicStates.data()
-        };
-        vk::PipelineViewportStateCreateInfo viewportState { .viewportCount = 1, .scissorCount = 1 };
-
-        vk::PipelineRasterizationStateCreateInfo rasterizer {
-            .depthClampEnable = vk::False,
-            .rasterizerDiscardEnable = vk::False,
-            .polygonMode = vk::PolygonMode::eFill,
-            .cullMode = vk::CullModeFlagBits::eBack,
-            .frontFace = vk::FrontFace::eCounterClockwise,
-            .depthBiasEnable = vk::False,
-            .lineWidth = 1.0f
-        };
-
-        vk::PipelineMultisampleStateCreateInfo multisampling {
-            .rasterizationSamples = m_MsaaSamples,
-            .sampleShadingEnable = vk::False
-        };
-
-        vk::PipelineDepthStencilStateCreateInfo depthStencil {
-            .depthTestEnable = vk::False,
-            .depthWriteEnable = vk::True,
-            .depthCompareOp = vk::CompareOp::eLess,
-            .depthBoundsTestEnable = vk::False,
-            .stencilTestEnable = vk::False
-        };
-
-        vk::PipelineColorBlendAttachmentState colorBlendAttachment {
-            .blendEnable = vk::True,
-            .srcColorBlendFactor = vk::BlendFactor::eSrcAlpha,
-            .dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha,
-            .colorBlendOp = vk::BlendOp::eAdd,
-            .srcAlphaBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha,
-            .dstAlphaBlendFactor = vk::BlendFactor::eZero,
-            .alphaBlendOp = vk::BlendOp::eAdd,
-            .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA
-        };
-
-        vk::PipelineColorBlendStateCreateInfo colorBlending {
-            .logicOpEnable = vk::False,
-            .logicOp = vk::LogicOp::eCopy,
-            .attachmentCount = 1,
-            .pAttachments = &colorBlendAttachment
-        };
-
-        vk::PushConstantRange pushConstantRange = {
-            .stageFlags = vk::ShaderStageFlagBits::eVertex,
-            .size = PipelineManager::getVertexPushConstantsSize()
-        };
-
-        vk::PipelineLayoutCreateInfo pipelineLayoutInfo {
-            .setLayoutCount = 0,                                    // # of descriptor set layouts
-            .pSetLayouts = nullptr,                                 // Pointer to descriptor set layouts
-            .pushConstantRangeCount = 1,                            // # of push constant ranges
-            .pPushConstantRanges = &pushConstantRange               // Pointer to push constant ranges
-        };
-        m_PointGraphicsPipelineLayout = vk::raii::PipelineLayout(m_Instance.getRaiiDevice(), pipelineLayoutInfo);
-
-        vk::Format depthFormat = m_VulkanResourceService->findDepthFormat();
-        vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo {
-            .colorAttachmentCount = 1,
-            .pColorAttachmentFormats = &m_SwapChainSurfaceFormat.format,
-            .depthAttachmentFormat = depthFormat
-        };
-
-        vk::GraphicsPipelineCreateInfo pipelineInfo {
-            .pNext = &pipelineRenderingCreateInfo,
-            .stageCount = 2,
-            .pStages = shaderStages,
-            .pVertexInputState = &vertexInputInfo,
-            .pInputAssemblyState = &inputAssembly,
-            .pViewportState = &viewportState,
-            .pRasterizationState = &rasterizer,
-            .pMultisampleState = &multisampling,
-            .pDepthStencilState = &depthStencil,
-            .pColorBlendState = &colorBlending,
-            .pDynamicState = &dynamicState,
-            .layout = m_GraphicsPipelineLayout,
-            .renderPass = nullptr                   // we're using dynamic rendering instead of render passes
-        };
-
-        m_PointGraphicsPipeline = vk::raii::Pipeline(m_Instance.getRaiiDevice(), nullptr, pipelineInfo);
-
-        // TODO cleanup
-        m_PipelineManager->registerPipeline(POINT_GRAPHICS_PIPELINE_NAME);
-        m_PipelineManager->setInfoForPipeline(
-            POINT_GRAPHICS_PIPELINE_NAME,
-            m_PointGraphicsPipeline,
-            m_PointGraphicsPipelineLayout,
-            vk::PipelineBindPoint::eGraphics
-        );
-    }
-
     void createColorResources() {
         VulkanImageData colorResources = m_VulkanResourceService->createColorResources(
             m_SwapChainSurfaceFormat.format, m_SwapChainExtent, m_MsaaSamples
@@ -1088,6 +802,7 @@ private:
         std::uniform_real_distribution<float> randomDistribution(0.0f, 1.0f);
 
         // Initial particles positions on a circle
+        // TODO extract pi to somewhere else
         float pi = 3.14159265358979323846f;
         std::vector<Particle> particles(PARTICLE_COUNT);
         for (auto & particle : particles) {
@@ -1129,7 +844,7 @@ private:
         m_ComputeCommandBuffers = vk::raii::CommandBuffers(m_Instance.getRaiiDevice(), allocInfo);
     }
 
-    void recordCommandBuffer(uint32_t imageIndex) {
+    void recordCommandBuffer(const uint32_t imageIndex) const {
         auto & commandBuffer = m_CommandBuffers[m_FrameIndex];
         commandBuffer.reset();
         commandBuffer.begin({});
@@ -1246,16 +961,13 @@ private:
     void recordComputeCommandBuffer() const {
         auto & commandBuffer = m_ComputeCommandBuffers[m_FrameIndex];
         commandBuffer.reset();
-
         commandBuffer.begin({});
-        commandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_ComputePipeline);
-        commandBuffer.pushConstants(
-            m_ComputePipelineLayout,
-            vk::ShaderStageFlagBits::eCompute,
-            0,
-            sizeof(ComputePushConstants),
-            &m_ComputePushConstants
-        );
+
+        m_PipelineManager->setActiveCommandBuffer(commandBuffer);
+        m_PipelineManager->setAndBindActivePipeline(COMPUTE_PIPELINE_NAME);
+        m_PipelineManager->prepareComputeConstants(m_ComputePushConstants.addressThisFrame, m_ComputePushConstants.addressLastFrame, m_DeltaTime);
+
+        m_PipelineManager->bindComputePushConstants();
         // Correlates to [numthreads(x, y, z)] inside the shader
         commandBuffer.dispatch(PARTICLE_COUNT / 256, 1, 1);
         commandBuffer.end();
@@ -1306,14 +1018,14 @@ private:
 
         m_Instance.getDevice().waitIdle();
 
-        m_PipelineManager->clearAll();
+        m_PipelineManager->destroyAll();
 
         cleanupSwapChain();
         createSwapChain();
 
-        createGraphicsPipeline();
-        createPointGraphicsPipeline();
-        createComputePipeline();
+        m_PipelineManager->createComputePipeline();
+        m_PipelineManager->createGraphicsPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
+        m_PipelineManager->createPointGraphicsPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
 
         cleanupColorResources();
         createColorResources();
@@ -1324,13 +1036,12 @@ private:
     void recompileShadersAndRecreatePipeline() {
         m_Instance.getDevice().waitIdle();
 
-        m_ComputePipeline.clear();
-        m_GraphicsPipeline.clear();
-        m_PointGraphicsPipeline.clear();
+        m_PipelineManager->destroyAll();
 
-        createComputePipeline();
-        createGraphicsPipeline();
-        createPointGraphicsPipeline();
+        m_PipelineManager->createComputePipeline();
+        m_PipelineManager->createGraphicsPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
+        m_PipelineManager->createPointGraphicsPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
+
         m_ShadersSetToReload = false;
     }
 
@@ -1343,7 +1054,6 @@ private:
     std::shared_ptr<TextureManager> m_TextureManager = nullptr;
 
     AssetManager m_AssetManager {};
-    HlslShaderCompiler m_ShaderCompiler {};
     EntitySystem m_EntitySystem {};
 
     Camera m_Camera {};
@@ -1372,15 +1082,6 @@ private:
     vk::Extent2D m_SwapChainExtent;
     std::vector<vk::ImageView> m_SwapChainImageViews;
     bool m_FramebufferResized = false;
-
-    vk::raii::PipelineLayout m_ComputePipelineLayout = nullptr;
-    vk::raii::Pipeline m_ComputePipeline = nullptr;
-
-    vk::raii::PipelineLayout m_GraphicsPipelineLayout = nullptr;
-    vk::raii::Pipeline m_GraphicsPipeline = nullptr;
-
-    vk::raii::PipelineLayout m_PointGraphicsPipelineLayout = nullptr;
-    vk::raii::Pipeline m_PointGraphicsPipeline = nullptr;
 
     bool m_ShadersSetToReload = false;
 

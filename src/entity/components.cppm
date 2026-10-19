@@ -11,7 +11,7 @@ import scene_graph_types;
 import glm;
 
 // Draw + Transform + Mesh = draw model system
-// LightSource + Transform + Light = draw light system
+// Transform + Light = draw light system
 
 export struct CDraw {
     uint32_t index = INDEX_UNSET;

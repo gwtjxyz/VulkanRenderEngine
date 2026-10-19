@@ -52,7 +52,7 @@ public:
         initializeSampler();
     }
 
-    void uninitialize() {
+    void destroy() {
         m_TextureSetLayout.clear();
         m_TextureSet.clear();
         m_TextureSampler.clear();

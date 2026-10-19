@@ -1,7 +1,5 @@
+#include "common.hlsli"
 #include "vertex_push_constants.hlsli"
-#include "shader_defines.hlsli"
-
-#pragma pack_matrix( row_major )
 
 struct VSInput {
     float3 inPosition: POSITION0;
@@ -15,86 +13,6 @@ struct VSInput {
 #define LIGHTING_MODE_OFF 0
 #define LIGHTING_MODE_PHONG 1
 #define LIGHTING_MODE_GOOCH 2
-
-float4x4 identity() {
-    return float4x4(
-        1.0, 0.0, 0.0, 0.0,
-        0.0, 1.0, 0.0, 0.0,
-        0.0, 0.0, 1.0, 0.0,
-        0.0, 0.0, 0.0, 1.0
-    );
-}
-
-float4x4 transMat(float4x4 mat, float4 v) {
-    float4x4 result = mat;
-    result[0][3] = v.x;
-    result[1][3] = v.y;
-    result[2][3] = v.z;
-
-    return result;
-}
-
-float4x4 quatToRotMat(float4 q) {
-    // Written using GLM as reference
-    float4x4 result = identity();
-
-    float qxx = pow(q.x, 2);
-    float qyy = pow(q.y, 2);
-    float qzz = pow(q.z, 2);
-    float qxz = q.x * q.z;
-    float qxy = q.x * q.y;
-    float qyz = q.y * q.z;
-    float qwx = q.w * q.x;
-    float qwy = q.w * q.y;
-    float qwz = q.w * q.z;
-
-#if 0
-    // row-major
-    result[0][0] = 1.0 - 2.0 * (qyy + qzz);
-    result[0][1] = 2.0 * (qxy + qwz);
-    result[0][2] = 2.0 * (qxz - qwy);
-
-    result[1][0] = 2.0 * (qxy - qwz);
-    result[1][1] = 1.0 - 2.0 * (qxx + qzz);
-    result[1][2] = 2.0 * (qyz + qwx);
-
-    result[2][0] = 2.0 * (qxz + qwy);
-    result[2][1] = 2.0 * (qyz - qwx);
-    result[2][2] = 1.0 - 2.0 * (qxx + qyy);
-#else
-    // column-major
-    result[0][0] = 1.0 - 2.0 * (qyy + qzz);
-    result[1][0] = 2.0 * (qxy + qwz);
-    result[2][0] = 2.0 * (qxz - qwy);
-
-    result[0][1] = 2.0 * (qxy - qwz);
-    result[1][1] = 1.0 - 2.0 * (qxx + qzz);
-    result[2][1] = 2.0 * (qyz + qwx);
-
-    result[0][2] = 2.0 * (qxz + qwy);
-    result[1][2] = 2.0 * (qyz - qwx);
-    result[2][2] = 1.0 - 2.0 * (qxx + qyy);
-#endif
-    return result;
-}
-
-float4x4 scaleMat(float4x4 mat, float4 v) {
-    float4x4 result = mat;
-    result[0][0] *= v.x;
-    result[1][1] *= v.y;
-    result[2][2] *= v.z;
-
-    return result;
-}
-
-// Pretend transform is stored as 3 float4 vectors
-float4x4 buildModelMatrix(float4 position, float4 rotation, float4 scale) {
-    float4x4 T = transMat(identity(), position);
-    float4x4 R = quatToRotMat(rotation);
-    float4x4 S = scaleMat(identity(), scale);
-
-    return mul(T, mul(R, S));
-}
 
 // Obviously very inefficient (storing flags as uints instead of bits), but for just toying around it's not a big deal
 struct VSOutput {
@@ -142,7 +60,6 @@ VSOutput VSMain(VSInput input) {
     float4x4 modelMatrix = buildModelMatrix(transformData.position, transformData.rotation, transformData.scale);
 
     output.pos = mul(vertexConstants.projection, mul(vertexConstants.view, mul(modelMatrix, float4(input.inPosition.xyz, 1.0))));
-    // Do I actually need both projection and view matrices?
     output.normal = mul(mul(vertexConstants.view, modelMatrix), float4(input.inNormal, 0.0));
     output.UV = input.inUV;
 
@@ -180,7 +97,7 @@ float4 phongLighting(float4 color, float3 normal, float3 light, float3 view) {
     float3 V = normalize(view);
     float3 R = reflect(-L, N);
 
-    float3 diffuse = max(dot(N, L), 0.1);
+    float3 diffuse = max(dot(N, L), 0.0);
     float3 specular = dot(N, L) > 0.0 ?
         pow(max(dot(R, V), 0.0), 16.0) * float3(0.75, 0.75, 0.75) * color.r :
         float3(0.0, 0.0, 0.0);
@@ -214,23 +131,6 @@ float4 goochLighting(float4 color, float3 normal, float3 light, float3 view) {
     return float4(shaded, 1.0);
 }
 
-/*
-    float4 pos : SV_POSITION;
-    float4 normal : NORMAL0;
-    float2 UV: TEXCOORD0;
-    float4 fragPos : FRAGPOS;
-    int lightMode : LIGHTMODE;
-
-    uint64_t materialAddress : MATERIAL_ADDRESS;
-    uint materialIndex : MATERIAL_INDEX;
-
-    uint64_t transformAddress : TRANSFORM_ADDRESS;
-    uint64_t lightAddress : LIGHTPTR;
-    uint lightCount : LIGHTCOUNT;
-
-    bool drawing : DRAWING;
-*/
-
 float4 PSMain(VSOutput input) : SV_TARGET {
     // Check if we need to draw at all
     if (!input.drawing) {
@@ -254,6 +154,9 @@ float4 PSMain(VSOutput input) : SV_TARGET {
         return noLighting(color);
     }
 
+    // Ambient (default) light
+    color *= 0.4f;
+
     // Iterate through all lights and apply them to the fragment
     for (uint i = 0; i < input.lightCount; ++i) {
         LightLayout lightData = rawVkBufferLoad<LightLayout>(input.lightAddress, i);
@@ -264,9 +167,9 @@ float4 PSMain(VSOutput input) : SV_TARGET {
         float3 lightVec = transformData.position.xyz - input.fragPos.xyz;
         float3 viewVec = -input.fragPos.xyz;
         if (input.lightMode == LIGHTING_MODE_PHONG) {
-            color = phongLighting(color, input.normal.xyz, lightVec, viewVec);
+            color += phongLighting(color, input.normal.xyz, lightVec, viewVec) * lightData.intensity;
         } else if (input.lightMode == LIGHTING_MODE_GOOCH) {
-            color = goochLighting(color, input.normal.xyz, lightVec, viewVec);
+            color += goochLighting(color, input.normal.xyz, lightVec, viewVec) * lightData.intensity;
         }
     }
 

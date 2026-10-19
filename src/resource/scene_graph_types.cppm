@@ -14,6 +14,7 @@ module;
 
 #include <cassert>
 #include <cstdint>
+#include <cstddef>
 
 export module scene_graph_types;
 
@@ -90,6 +91,18 @@ export struct Attribute {
 
     bool operator==(const Attribute & other) const {
         return position == other.position && normal == other.normal && texcoord0 == other.texcoord0;
+    }
+
+    static vk::VertexInputBindingDescription getBindingDescription() {
+        return { .binding = 0, .stride = sizeof(Attribute), .inputRate = vk::VertexInputRate::eVertex };
+    }
+
+    static std::array<vk::VertexInputAttributeDescription, 3> getAttributeDescriptions() {
+        return {
+            vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32B32Sfloat, offsetof(Attribute, position)),
+            vk::VertexInputAttributeDescription(1, 0, vk::Format::eR32G32B32Sfloat, offsetof(Attribute, normal)),
+            vk::VertexInputAttributeDescription(2, 0, vk::Format::eR32G32Sfloat, offsetof(Attribute, texcoord0))
+        };
     }
 };
 

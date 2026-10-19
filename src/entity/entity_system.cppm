@@ -91,7 +91,7 @@ public:
         // TODO Setup callbacks
     }
 
-    void prepareAndRender(uint32_t frameIndex) {
+    void prepareAndRender(const uint32_t frameIndex) const {
         auto * deviceMapper = DeviceMapperLocator::locate();
 
         m_LightPrepareSystem.run();
@@ -102,9 +102,8 @@ public:
     }
 
     void setPosition(const std::string & entityName, const glm::vec3 pos) const {
-        auto entity = m_World.lookup(entityName.c_str());
-        auto * t = entity.try_get_mut<CTransform>();
-        if (t) {
+        const auto entity = m_World.lookup(entityName.c_str());
+        if (auto * t = entity.try_get_mut<CTransform>()) {
             t->position = pos;
             t->dirty = true;
         }
@@ -112,8 +111,7 @@ public:
 
     void setPosition(const char * entityName, const glm::vec3 newPos) const {
         const auto entity = m_World.lookup(entityName);
-        auto * t = entity.try_get_mut<CTransform>();
-        if (t) {
+        if (auto * t = entity.try_get_mut<CTransform>()) {
             t->position = newPos;
             t->dirty = true;
         }
@@ -121,17 +119,15 @@ public:
 
     void setScale(const char * entityName, const float newScale) const {
         const auto entity = m_World.lookup(entityName);
-        auto * t = entity.try_get_mut<CTransform>();
-        if (t) {
+        if (auto * t = entity.try_get_mut<CTransform>()) {
             t->scale = {newScale, newScale, newScale};
             t->dirty = true;
         }
     }
 
-    void rotate(const std::string & entityName, float rotX, float rotY, float rotZ) {
-        auto entity = m_World.lookup(entityName.c_str());
-        auto * t = entity.try_get_mut<CTransform>();
-        if (t) {
+    void rotate(const std::string & entityName, const float rotX, const float rotY, const float rotZ) const {
+        const auto entity = m_World.lookup(entityName.c_str());
+        if (auto * t = entity.try_get_mut<CTransform>()) {
             t->rotateX(rotX);
             t->rotateY(rotY);
             t->rotateZ(rotZ);

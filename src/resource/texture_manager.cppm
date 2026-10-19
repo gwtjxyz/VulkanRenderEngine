@@ -116,7 +116,7 @@ public:
 
     }
 
-    void unloadAll() {
+    void destroyAll() {
         const auto * vulkanResourceService = VulkanResourceServiceLocator::locate();
         for (auto & texture : m_Textures) {
             if (texture.occupied) {
