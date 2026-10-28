@@ -23,10 +23,14 @@ export const std::string VIKING_ROOM_TEXTURE_NAME = "viking_room.png";
 export const std::string VIKING_ROOM_MATERIAL_NAME = "viking_room";
 export const std::string VIKING_ROOM_ENTITY_NAME = "viking_room";
 
+export const std::string VIKING_ROOM_2_ENTITY_NAME = "viking_room_2";
+
 export const std::string TERRAIN_MODEL_NAME = "terrain.obj";
 export const std::string TERRAIN_TEXTURE_NAME = "terrain_diffuse.png";
 export const std::string TERRAIN_MATERIAL_NAME = "terrain";
 export const std::string TERRAIN_ENTITY_NAME = "terrain";
+
+export const std::string CUBE_MODEL_NAME = "cube.obj";
 
 // GLTF
 

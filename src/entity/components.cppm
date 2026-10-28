@@ -40,11 +40,30 @@ export struct CTransform {
         rotation = glm::rotate(rotation, glm::radians(angle), glm::vec3(0.0f, 0.0f, 1.0f));
         dirty = true;
     }
+
+    SceneGraphTypes::Transform toSceneTransform() const {
+        return SceneGraphTypes::Transform {
+            .translation = position,
+            .rotation = rotation,
+            .scale = scale
+        };
+    }
 };
 
 export struct CMesh {
-    SceneGraphAsset * asset = nullptr;       // contains vertex/index buffer info + material info
+    AssetInstance instance {};
     bool outOfDate = true;
+};
+
+// TODO finish
+export enum class LightType : uint32_t {
+    // Global light that has a direction from where the light is coming from
+    // Position is ignored
+    Directional = 0,
+    // Punctual light that emits light uniformly in all directions
+    Point,
+    // Punctual light that emits light in a particular direction
+    Spotlight
 };
 
 export struct CLight {
@@ -52,6 +71,10 @@ export struct CLight {
     glm::vec3 color {1.0f, 1.0f, 1.0f};
     float intensity {1.0f};
     uint32_t index = INDEX_UNSET;
+    LightType type = LightType::Point;
     bool enabled = true;
     bool dirty = true;
+
+    // TODO remove?
+    AssetInstance cubeDisplay {};
 };

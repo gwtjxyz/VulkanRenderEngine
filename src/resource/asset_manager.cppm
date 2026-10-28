@@ -20,41 +20,41 @@ export class AssetManager {
 public:
     AssetManager() = default;
 
-    SceneGraphAsset * getOrCreateAsset(const std::string & assetName) {
-        const auto it = m_SceneGraphAssets.find(assetName);
-        if (it != m_SceneGraphAssets.end()) {
+    Asset * getOrCreateAsset(const std::string & assetName) {
+        const auto it = m_Assets.find(assetName);
+        if (it != m_Assets.end()) {
             return &it->second;
         }
 
         auto * parser = ModelParserLocator::locate();
         auto asset = parser->load(pathFromAssetDir(assetName));
         if (asset.has_value()) {
-            m_SceneGraphAssets.insert({ assetName, asset.value() });
+            m_Assets.insert({ assetName, asset.value() });
         } else {
             return nullptr;
         }
 
-        return &m_SceneGraphAssets.at(assetName);
+        return &m_Assets.at(assetName);
     }
 
     void loadAll() {
-        for (auto & asset : m_SceneGraphAssets | std::views::values) {
+        for (auto & asset : m_Assets | std::views::values) {
             asset.load();
         }
     }
 
     void unloadAll() {
-        for (auto & asset : m_SceneGraphAssets | std::views::values) {
+        for (auto & asset : m_Assets | std::views::values) {
             asset.unload();
         }
     }
 
     void destroyAll() {
-        for (auto & asset : m_SceneGraphAssets | std::views::values) {
+        for (auto & asset : m_Assets | std::views::values) {
             asset.destroy();
         }
     }
 
 private:
-    std::unordered_map<std::string, SceneGraphAsset> m_SceneGraphAssets {};
+    std::unordered_map<std::string, Asset> m_Assets {};
 };

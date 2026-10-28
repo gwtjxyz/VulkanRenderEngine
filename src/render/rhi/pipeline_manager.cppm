@@ -65,8 +65,9 @@ private:
         LightMode lightMode;
         uint32_t lightCount;
 
-        // Set this while rendering entities
+        // Set these while rendering entities
         uint32_t drawIndex;
+        uint32_t instanceTransformIndex;
     };
 
     struct ComputePushConstants {
@@ -477,6 +478,7 @@ public:
     // TODO add instancing support
     void executeDrawCall(SceneGraphTypes::DrawCallData & drawData) {
         m_VertexPushConstants.drawIndex = drawData.drawIndex;
+        m_VertexPushConstants.instanceTransformIndex = drawData.instanceTransformIndex;
         bindVertexPushConstants();
 
         m_ActiveCommandBuffer.bindVertexBuffers(0, drawData.vertexBuffer, { drawData.vertexOffsetBytes });

@@ -33,6 +33,7 @@ public:
         prepareLightSystem();
         prepareObjectSystem();
         prepareRenderSystem();
+        prepareLightCubeSystem();
     }
 
     // Creates all the entities that we will be drawing
@@ -48,10 +49,25 @@ public:
         auto * vikingRoomAssetHandle = assetManager.getOrCreateAsset(VIKING_ROOM_MODEL_NAME);
         assert(vikingRoomAssetHandle);
         vikingRoomAssetHandle->load();
-        roomMesh.asset = vikingRoomAssetHandle;
+        roomMesh.instance = AssetInstance(vikingRoomAssetHandle);
+        roomMesh.instance.load();
 
         // TODO remove - temporary
         m_WorldObjects.emplace_back(VIKING_ROOM_ENTITY_NAME.c_str());
+
+        // Non-spinning room (asset instancing test)
+        auto roomEntity2 = m_World.entity(VIKING_ROOM_2_ENTITY_NAME.c_str()).is_a(m_ObjectPrefab);
+        auto & roomTransform2 = roomEntity2.get_mut<CTransform>();
+        roomTransform2.position = { 3.5f, 0.5f, 0.5f };
+        roomTransform2.rotateX(-90.0f);
+        roomTransform2.rotateZ(45.0f);
+
+        auto & roomMesh2 = roomEntity2.get_mut<CMesh>();
+        roomMesh2.instance = AssetInstance(vikingRoomAssetHandle);
+        roomMesh2.instance.load();
+
+        // TODO remove - temporary
+        m_WorldObjects.emplace_back(VIKING_ROOM_2_ENTITY_NAME.c_str());
 
         // Terrain
         auto terrainEntity = m_World.entity(TERRAIN_ENTITY_NAME.c_str()).is_a(m_ObjectPrefab);
@@ -63,7 +79,8 @@ public:
         auto * terrainAssetHandle = assetManager.getOrCreateAsset(TERRAIN_MODEL_NAME);
         assert(terrainAssetHandle);
         terrainAssetHandle->load();
-        terrainMesh.asset = terrainAssetHandle;
+        terrainMesh.instance = AssetInstance(terrainAssetHandle);
+        terrainMesh.instance.load();
 
         // TODO remove - temporary
         m_WorldObjects.emplace_back(TERRAIN_ENTITY_NAME.c_str());
@@ -78,24 +95,47 @@ public:
         auto * castleAssetHandle = assetManager.getOrCreateAsset(CASTLE_MODEL_NAME);
         assert(castleAssetHandle);
         castleAssetHandle->load();
-        castleMesh.asset = castleAssetHandle;
+        castleMesh.instance = AssetInstance(castleAssetHandle);
+        castleMesh.instance.load();
 
         // TODO remove - temporary
         m_WorldObjects.emplace_back(CASTLE_ENTITY_NAME.c_str());
 
+        // Import cube for light source display
+        auto * cubeAssetHandle = assetManager.getOrCreateAsset(CUBE_MODEL_NAME);
+        cubeAssetHandle->load();
+        m_LightCubeAsset = cubeAssetHandle;
+
+        auto cubeTransform = SceneGraphTypes::Transform {
+            {},
+            {1.0f, 0.0f, 0.0f, 0.0f},
+            {0.1f, 0.1f, 0.1f}
+        };
+        m_LightCubeAsset->updateSceneTransform(cubeTransform, TransformUpdateFlags::Scale, true);
+
         // Light source
-        auto light = m_World.entity(LIGHT_ENTITY_NAME.c_str()).is_a(m_LightPrefab);
-        auto & lightTransform = light.get_mut<CTransform>();
+        auto lightEntity = m_World.entity(LIGHT_ENTITY_NAME.c_str()).is_a(m_LightPrefab);
+        auto & lightTransform = lightEntity.get_mut<CTransform>();
         lightTransform.position = { 0.0f, -10.0f, 10.0f };
+        // TODO remove - temporary
+        auto & lightParams = lightEntity.get_mut<CLight>();
+        lightParams.cubeDisplay = AssetInstance(cubeAssetHandle);
+        lightParams.cubeDisplay.load();
+
+        // TODO remove - temporary
+        m_LightObjects.emplace_back(LIGHT_ENTITY_NAME.c_str());
 
         // TODO Setup callbacks
     }
 
-    void prepareAndRender(const uint32_t frameIndex) const {
+    void prepareAndRender(const uint32_t frameIndex, const bool drawLightCubes) const {
         auto * deviceMapper = DeviceMapperLocator::locate();
 
         m_LightPrepareSystem.run();
         m_ObjectPrepareSystem.run();
+        if (drawLightCubes) {
+            m_LightCubeSystem.run();
+        }
         deviceMapper->uploadToGPU(frameIndex);
 
         m_RenderSystem.run();
@@ -139,9 +179,18 @@ public:
         return m_WorldObjects;
     }
 
-    const CTransform * getTransformForObject(const char * objectName) const {
+    const std::vector<const char *> & getLightNames() const {
+        return m_LightObjects;
+    }
+
+    const CTransform * getTransform(const char * objectName) const {
         const auto entity = m_World.lookup(objectName);
         return entity.try_get<CTransform>();
+    }
+
+    const CLight * getLight(const char * objectName) const {
+        const auto entity = m_World.lookup(objectName);
+        return entity.try_get<CLight>();
     }
 
 private:
@@ -181,16 +230,12 @@ private:
     void prepareObjectSystem() {
         m_ObjectPrepareSystem = m_World.system<CTransform, CMesh>().each(
             [this](flecs::iter & it, size_t row, CTransform & t, CMesh & m) {
-                if (!m.asset || !m.asset->isLoaded()) {
+                if (!m.instance.getAsset() || !m.instance.isLoaded()) {
                     return;
                 }
 
                 if (t.dirty || m.outOfDate) {
-                    m.asset->updateSceneTransform(
-                        toSceneGraphTransform(t),
-                        TransformUpdateFlags::Translation | TransformUpdateFlags::Scale | TransformUpdateFlags::Rotation,
-                        true
-                    );
+                    m.instance.update(t.toSceneTransform());
                     t.dirty = false;
                     m.outOfDate = false;
                 }
@@ -201,11 +246,11 @@ private:
     void prepareRenderSystem() {
         m_RenderSystem = m_World.system<CTransform, CMesh>().each(
             [this](flecs::iter & it, size_t row, CTransform & t, CMesh & m) {
-                if (!m.asset || !m.asset->isLoaded()) {
+                if (!m.instance.getAsset() || !m.instance.isLoaded()) {
                     return;
                 }
 
-                auto drawCallData = m.asset->prepareDrawData();
+                auto drawCallData = m.instance.prepareDrawData();
                 if (!drawCallData.empty()) {
                     auto * pipelineManager = PipelineManagerLocator::locate();
                     for (auto & drawCall : drawCallData) {
@@ -215,6 +260,29 @@ private:
                 }
             }
         );
+    }
+
+    // TODO change - very hacky, this should ideally use instanced rendering and probably not be a separate system
+    void prepareLightCubeSystem() {
+        m_LightCubeSystem = m_World.system<CTransform, CLight>().each(
+            [this](flecs::iter & it, size_t row, CTransform & t, CLight & l) {
+                if (!m_LightCubeAsset || !m_LightCubeAsset->isLoaded() || !l.cubeDisplay.isLoaded()) {
+                    return;
+                }
+
+                if (t.dirty) {
+                    l.cubeDisplay.update(t.toSceneTransform());
+                    t.dirty = false;
+                }
+
+                auto drawCallData = l.cubeDisplay.prepareDrawData();
+                if (!drawCallData.empty()) {
+                    auto * pipelineManager = PipelineManagerLocator::locate();
+                    for (auto & drawCall : drawCallData) {
+                        pipelineManager->executeDrawCall(drawCall);
+                    }
+                }
+            });
     }
 
     static void mapTransform(CTransform & t, DeviceMapper * deviceMapper) {
@@ -238,5 +306,10 @@ private:
     flecs::system m_LightPrepareSystem;
     flecs::system m_RenderSystem;
 
+    // TODO change - temporary solution, not very clean
+    flecs::system m_LightCubeSystem;
+    Asset * m_LightCubeAsset = nullptr;
+
     std::vector<const char *> m_WorldObjects {};
+    std::vector<const char *> m_LightObjects {};
 };

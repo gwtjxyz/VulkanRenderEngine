@@ -160,7 +160,7 @@ private:
 
         // Still want to update lastX and lastY so we don't get a massive jump when we stop hovering over
         // an imgui window, but don't want to route it to our camera controls
-        if (RenderEngine::isImguiCapturingMouse() || app->m_ShouldCursorBeVisible) {
+        if (isImguiCapturingMouse() || app->m_ShouldCursorBeVisible) {
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
             return;
         }
@@ -539,7 +539,7 @@ private:
             if (selectedObject != -1) {
                 // Need to display controls for changing object's transform
                 auto objectName = m_EntitySystem.getObjectNames().at(selectedObject);
-                auto transform = m_EntitySystem.getTransformForObject(objectName);
+                auto transform = m_EntitySystem.getTransform(objectName);
                 assert(transform);
 
                 static float transformPosWidgetData[3] {};
@@ -567,6 +567,36 @@ private:
                     m_EntitySystem.setScale(objectName, transformScaleWidgetData);
                 }
             }
+        }
+
+        // TODO use tabs
+
+        if (ImGui::CollapsingHeader("Light Controls (WIP)", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::Spacing();
+            static int selectedLight = -1;
+            static int previouslySelectedLight = selectedLight;
+            const float spacing = ImGui::GetStyle().ItemInnerSpacing.x + 5.0f;
+            ImGui::Text("Light Count: XX");
+            ImGui::SameLine(0.0f, spacing);
+            if (ImGui::Button("Add")) {
+                // TODO
+            }
+            ImGui::SameLine(0.0f, spacing);
+            ImGui::Checkbox("Draw light cubes", &m_DrawLightCubes);
+
+            // Light properties
+            static float lightPos[3];
+            static float lightDirection[3];
+            static float lightColor[4];
+
+            ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.5f);
+            ImGui::DragFloat3("Position", lightPos, 0.005f, -20.0f, 20.0f, "%.3f");
+            ImGui::DragFloat3("Direction", lightDirection, 0.5f, -360.0f, 360.0f, "%.1f");
+
+            ImGui::ColorEdit4("Light Color", lightColor);
+            ImGui::PopItemWidth();
+
+
         }
 
         ImGui::End();
@@ -730,15 +760,22 @@ private:
         ImGuiIO & io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+        io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
 
         // Setup Platform/Renderer backends
         ImGui_ImplGlfw_InitForVulkan(m_Window, true);
+
+        ImGui::StyleColorsDark();
+        auto & style = ImGui::GetStyle();
+        style.Alpha = 1.0f;
+        style.WindowRounding = 3.0f;
+        style.FrameRounding = 3.0f;
+        style.TabRounding = 3.0f;
 
         auto vkSurfaceFormat = static_cast<VkFormat>(m_SwapChainSurfaceFormat.format);
         auto vkDepthFormat = static_cast<VkFormat>(m_VulkanResourceService->findDepthFormat());
 
         ImGui::StyleColorsDark();
-
         ImGui_ImplVulkan_InitInfo initInfo = {
             .ApiVersion = vk::ApiVersion14,
             .Instance = m_Instance.getInstance(),
@@ -939,7 +976,7 @@ private:
         m_PipelineManager->setLightCount(m_DeviceMapper->getLightCount());
 
         // Draw entities
-        m_EntitySystem.prepareAndRender(m_FrameIndex);
+        m_EntitySystem.prepareAndRender(m_FrameIndex, m_DrawLightCubes);
 
         // Draw ImGui
         ImGui::Render();
@@ -1071,6 +1108,7 @@ private:
     bool m_ShouldCursorBeVisible = false;
     bool m_CanUiFocusBeToggled = false;     // Seems janky, should probably move to a more robust input state handling method later
     bool m_IsModelSpinEnabled = true;
+    bool m_DrawLightCubes = false;
 
     GLFWwindow * m_Window = nullptr;
 

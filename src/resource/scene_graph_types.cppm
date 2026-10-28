@@ -81,6 +81,23 @@ export struct Transform {
 
         return transform;
     }
+
+    void mapToDevice(DeviceMapper * deviceMapper, const uint32_t index) const {
+        auto * deviceTransform = deviceMapper->getTransform(index);
+
+        deviceTransform->layout.position.x = translation.x;
+        deviceTransform->layout.position.y = translation.y;
+        deviceTransform->layout.position.z = translation.z;
+
+        deviceTransform->layout.rotation.x = rotation.x;
+        deviceTransform->layout.rotation.y = rotation.y;
+        deviceTransform->layout.rotation.z = rotation.z;
+        deviceTransform->layout.rotation.w = rotation.w;
+
+        deviceTransform->layout.scale.x = scale.x;
+        deviceTransform->layout.scale.y = scale.y;
+        deviceTransform->layout.scale.z = scale.z;
+    }
 };
 
 // Simple, minimal data format for now - TODO expand
@@ -141,6 +158,7 @@ export struct Mesh {
 };
 
 export struct DrawCallData {
+    uint32_t instanceTransformIndex;
     uint32_t drawIndex;
     vk::Buffer vertexBuffer;
     uint32_t vertexOffsetBytes;
@@ -163,6 +181,7 @@ struct Scene {
     std::vector<Material> materials;
     std::vector<Node> nodes;
 
+    // Global scene transform - applies to each instance of asset
     Transform sceneTransform;
 
     std::vector<uint32_t> rootIndices;
@@ -183,7 +202,7 @@ struct std::hash<SceneGraphTypes::Attribute> {
     }
 };
 
-export class SceneGraphAsset {
+export class Asset {
 private:
     using graph_index = uint32_t;
 
@@ -204,7 +223,7 @@ private:
     };
 
 public:
-    explicit SceneGraphAsset(SceneGraphTypes::Scene scene) : m_Scene(std::move(scene)), m_Loaded(false), m_DeviceMapper(DeviceMapperLocator::locate()) {}
+    explicit Asset(SceneGraphTypes::Scene scene) : m_Scene(std::move(scene)), m_DeviceMapper(DeviceMapperLocator::locate()) {}
 
     [[nodiscard]] bool isLoaded() const {
         return m_Loaded;
@@ -308,7 +327,7 @@ public:
         vulkanResourceService->freeResources(m_Scene.indexBuffer);
     }
 
-    std::vector<SceneGraphTypes::DrawCallData> prepareDrawData() {
+    std::vector<SceneGraphTypes::DrawCallData> prepareDrawData(const device_index instanceTransformIndex) {
         std::vector<SceneGraphTypes::DrawCallData> drawData {};
         if (!m_Loaded) return drawData;
 
@@ -342,6 +361,7 @@ public:
             graph_index meshPrimitiveIndex = 0;
             for (const auto & mp : m.primitives) {
                 SceneGraphTypes::DrawCallData data {};
+                data.instanceTransformIndex = instanceTransformIndex;
                 data.drawIndex = m_DrawMap.at({ meshIndex, meshPrimitiveIndex });
                 data.vertexBuffer = m_Scene.vertexBuffer.buffer;
                 data.vertexOffsetBytes = mp.vertexOffset * sizeof(SceneGraphTypes::Attribute);
@@ -390,13 +410,11 @@ public:
     }
 
 private:
-    // Need to apply to bottom-most nodes
     glm::mat4x4 computeGlobalTransform(const SceneGraphTypes::Node * node) {
         assert(node);
 
         const glm::mat4x4 localModelMatrix = node->localTransform.asMatrix();
 
-        // What happens if sceneTransform is empty? Why is it even empty?
         if (node->parentNodeIndex == UINT32_MAX) {
             return m_Scene.sceneTransform.asMatrix() * localModelMatrix;
         }
@@ -404,25 +422,14 @@ private:
         return computeGlobalTransform(m_Scene.nodeAtIndex(node->parentNodeIndex)) * localModelMatrix;
     }
 
+    // Computes and loads model-space transform for any given node relative to root node
     void computeAndLoadGlobalMeshTransform(graph_index meshIndex, SceneGraphTypes::Mesh & mesh) {
         glm::mat4x4 globalTransformMatrix = computeGlobalTransform(m_Scene.nodeAtIndex(mesh.parentNodeIndex));
         mesh.globalTransform = globalTransformMatrix;
 
-        auto [translation, rotation, scale] = SceneGraphTypes::Transform::fromMatrix(mesh.globalTransform);
-        auto * deviceTransform = m_DeviceMapper->getTransform(m_TransformMap.at(meshIndex));
-
-        deviceTransform->layout.position.x = translation.x;
-        deviceTransform->layout.position.y = translation.y;
-        deviceTransform->layout.position.z = translation.z;
-
-        deviceTransform->layout.rotation.x = rotation.x;
-        deviceTransform->layout.rotation.y = rotation.y;
-        deviceTransform->layout.rotation.z = rotation.z;
-        deviceTransform->layout.rotation.w = rotation.w;
-
-        deviceTransform->layout.scale.x = scale.x;
-        deviceTransform->layout.scale.y = scale.y;
-        deviceTransform->layout.scale.z = scale.z;
+        const auto transform = SceneGraphTypes::Transform::fromMatrix(mesh.globalTransform);
+        const device_index transformIndex = m_TransformMap.at(meshIndex);
+        transform.mapToDevice(m_DeviceMapper, transformIndex);
     }
 
 private:
@@ -436,4 +443,73 @@ private:
     std::unordered_map<graph_index, device_index> m_TransformMap {};
     // unique for each material
     std::unordered_map<graph_index, device_index> m_MaterialMap {};
+};
+
+// Kinda want names for these
+// Where do we get the names from?
+export class AssetInstance {
+public:
+    explicit AssetInstance() {}
+
+    explicit AssetInstance(Asset * asset) : m_Asset(asset) {}
+
+    // Instantiate object into game world
+    void load() {
+        if (m_IsLoaded) return;
+
+        auto * deviceMapper = DeviceMapperLocator::locate();
+        m_TransformIndex = deviceMapper->addTransform();
+        m_Transform.mapToDevice(deviceMapper, m_TransformIndex);
+
+        m_IsLoaded = true;
+    }
+
+    // Remove object from game world
+    void unload() {
+        if (!m_IsLoaded) return;
+
+        auto * deviceMapper = DeviceMapperLocator::locate();
+        deviceMapper->removeTransform(m_TransformIndex);
+        m_TransformIndex = INDEX_UNSET;
+
+        m_IsLoaded = false;
+    }
+
+    void update(const SceneGraphTypes::Transform & transform) {
+        if (!m_IsLoaded) return;
+
+        m_Transform = transform;
+
+        auto * deviceMapper = DeviceMapperLocator::locate();
+        m_Transform.mapToDevice(deviceMapper, m_TransformIndex);
+    }
+
+    std::vector<SceneGraphTypes::DrawCallData> prepareDrawData() const {
+        return m_Asset->prepareDrawData(m_TransformIndex);
+    }
+
+    SceneGraphTypes::Transform & getTransform() {
+        return m_Transform;
+    }
+
+    void setTransform(const SceneGraphTypes::Transform & transform) {
+        m_Transform = transform;
+    }
+
+    Asset * getAsset() const {
+        return m_Asset;
+    }
+
+    void setAsset(Asset * asset) {
+        m_Asset = asset;
+    }
+
+    bool isLoaded() const {
+        return m_IsLoaded;
+    }
+private:
+    Asset * m_Asset = nullptr;
+    SceneGraphTypes::Transform m_Transform {};
+    device_index m_TransformIndex = INDEX_UNSET;
+    bool m_IsLoaded = false;
 };

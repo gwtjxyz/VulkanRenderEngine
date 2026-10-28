@@ -90,7 +90,7 @@ class ModelParser {
 public:
     ModelParser() : m_Parser(supportedExtensions) {}
 
-    std::optional<SceneGraphAsset> load(const std::filesystem::path & path) {
+    std::optional<Asset> load(const std::filesystem::path & path) {
         auto extension = path.extension();
         if (extension == ".gltf") {
             return loadGltf(path);
@@ -103,7 +103,7 @@ public:
         return {};
     }
 
-    std::optional<SceneGraphAsset> loadGltf(const std::filesystem::path & path) {
+    std::optional<Asset> loadGltf(const std::filesystem::path & path) {
         auto startTime = std::chrono::steady_clock::now();
 
         auto data = fastgltf::GltfDataBuffer::FromPath(path);
@@ -291,12 +291,12 @@ public:
         std::chrono::duration<double, std::milli> msSpentParsing = std::chrono::steady_clock::now() - startTime;
         std::cout << "[INFO] Parsing glTF model at path " << path << " took " << msSpentParsing.count() << "ms" << std::endl;
 
-        SceneGraphAsset sceneGraph { scene };
+        Asset sceneGraph { scene };
 
         return sceneGraph;
     }
 
-    std::optional<SceneGraphAsset> loadObj(const std::filesystem::path & path) {
+    std::optional<Asset> loadObj(const std::filesystem::path & path) {
         auto startTime = std::chrono::steady_clock::now();
         auto modelDirectory = path.parent_path();
 
@@ -311,7 +311,8 @@ public:
         std::vector<uint32_t> indices;
 
         // TODO wchar support?
-        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, path.string().c_str()), modelDirectory.string().c_str()) {
+        auto modelDirString = modelDirectory.string();
+        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, path.string().c_str(), modelDirString.c_str())) {
             if (!err.empty()) {
                 std::println("Error loading OBJ model from path {}: {} {}", path.string(), warn, err);
                 return {};
@@ -413,7 +414,7 @@ public:
         std::chrono::duration<double, std::milli> msSpentParsing = std::chrono::steady_clock::now() - startTime;
         std::cout << "[INFO] Parsing OBJ model at path " << path << " took " << msSpentParsing.count() << "ms" << std::endl;
 
-        SceneGraphAsset sceneGraph { scene };
+        Asset sceneGraph { scene };
 
         return sceneGraph;
     }

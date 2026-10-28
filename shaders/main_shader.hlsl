@@ -10,9 +10,18 @@ struct VSInput {
 [[vk::binding(0)]] SamplerState textureSampler;
 [[vk::binding(1)]] Texture2D textureArray[];
 
+// TODO: replace with static constants instead of defines?
 #define LIGHTING_MODE_OFF 0
 #define LIGHTING_MODE_PHONG 1
 #define LIGHTING_MODE_GOOCH 2
+
+static const float gMinLightDst = 0.5f;
+static const float gMaxLightDst = 200.0f;
+
+float distanceMultiplier(float distance, float intensity) {
+    float multiplier = intensity / max(distance, gMinLightDst);
+    return multiplier * multiplier;
+}
 
 // Obviously very inefficient (storing flags as uints instead of bits), but for just toying around it's not a big deal
 struct VSOutput {
@@ -38,7 +47,7 @@ VSOutput VSMain(VSInput input) {
     // First, check if we actually need to draw anything
     // for entities without an active draw component, drawIndex will be of a special value
 
-    if (vertexConstants.drawIndex == UINT32_MAX) {
+    if (vertexConstants.drawIndex == UINT32_MAX || vertexConstants.instanceTransformIndex == UINT32_MAX) {
         output.drawing = false;
         return output;
     }
@@ -56,8 +65,15 @@ VSOutput VSMain(VSInput input) {
 
     output.drawing = true;
 
-    TransformLayout transformData = rawVkBufferLoad<TransformLayout>(vertexConstants.transformAddress, drawData.transformIndex);
-    float4x4 modelMatrix = buildModelMatrix(transformData.position, transformData.rotation, transformData.scale);
+    // Scene transform = transform of any given asset
+    // Instance transform = transform of any given instance using a particular asset
+    // To properly place something in the world, we need to combine both.
+    TransformLayout sceneTransformData = rawVkBufferLoad<TransformLayout>(vertexConstants.transformAddress, drawData.transformIndex);
+    float4x4 sceneMatrix = buildModelMatrix(sceneTransformData.position, sceneTransformData.rotation, sceneTransformData.scale);
+    TransformLayout instanceTransformData = rawVkBufferLoad<TransformLayout>(vertexConstants.transformAddress, vertexConstants.instanceTransformIndex);
+    float4x4 instanceMatrix = buildModelMatrix(instanceTransformData.position, instanceTransformData.rotation, instanceTransformData.scale);
+
+    float4x4 modelMatrix = mul(instanceMatrix, sceneMatrix);
 
     output.pos = mul(vertexConstants.projection, mul(vertexConstants.view, mul(modelMatrix, float4(input.inPosition.xyz, 1.0))));
     output.normal = mul(mul(vertexConstants.view, modelMatrix), float4(input.inNormal, 0.0));
@@ -99,7 +115,7 @@ float4 phongLighting(float4 color, float3 normal, float3 light, float3 view) {
 
     float3 diffuse = max(dot(N, L), 0.0);
     float3 specular = dot(N, L) > 0.0 ?
-        pow(max(dot(R, V), 0.0), 16.0) * float3(0.75, 0.75, 0.75) * color.r :
+        pow(max(dot(R, V), 0.0), 16.0) * float3(0.75, 0.75, 0.75) :
         float3(0.0, 0.0, 0.0);
 
     return float4(diffuse * color.rgb + specular, 1.0);
@@ -158,18 +174,26 @@ float4 PSMain(VSOutput input) : SV_TARGET {
     color *= 0.4f;
 
     // Iterate through all lights and apply them to the fragment
+    // TODO rework light formulas - right now things don't look quite right
     for (uint i = 0; i < input.lightCount; ++i) {
         LightLayout lightData = rawVkBufferLoad<LightLayout>(input.lightAddress, i);
 
         if (!lightData.enabled || lightData.transformIndex == UINT32_MAX) continue;
 
         TransformLayout transformData = rawVkBufferLoad<TransformLayout>(input.transformAddress, lightData.transformIndex);
+
+        float lightDst = distance(transformData.position, input.fragPos);
+        if (lightDst >= gMaxLightDst) continue;
+
         float3 lightVec = transformData.position.xyz - input.fragPos.xyz;
         float3 viewVec = -input.fragPos.xyz;
+
+        float intensity = distanceMultiplier(lightDst, lightData.intensity);
+
         if (input.lightMode == LIGHTING_MODE_PHONG) {
-            color += phongLighting(color, input.normal.xyz, lightVec, viewVec) * lightData.intensity;
+            color += intensity * float4(lightData.color, 1.0f) + phongLighting(color, input.normal.xyz, lightVec, viewVec);
         } else if (input.lightMode == LIGHTING_MODE_GOOCH) {
-            color += goochLighting(color, input.normal.xyz, lightVec, viewVec) * lightData.intensity;
+            color += intensity * float4(lightData.color, 1.0f) + goochLighting(color, input.normal.xyz, lightVec, viewVec);
         }
     }
 

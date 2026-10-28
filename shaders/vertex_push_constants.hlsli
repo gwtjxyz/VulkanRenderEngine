@@ -58,6 +58,7 @@ struct VertexPushConstants {
     uint lightCount;
 
     uint drawIndex;
+    uint instanceTransformIndex;
 };
 
 [[vk::push_constant]]
