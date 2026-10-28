@@ -10,15 +10,11 @@ import scene_graph_types;
 
 import glm;
 
-// Draw + Transform + Mesh = draw model system
+// Transform + Mesh = draw model system
 // Transform + Light = draw light system
 
-export struct CDraw {
-    uint32_t index = INDEX_UNSET;
-    bool enabled = true;
-};
-
-export struct CTransform {
+namespace Components {
+export struct Transform {
     glm::vec3 position = glm::vec3(0.0f);
     glm::quat rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
     glm::vec3 scale = glm::vec3(1.0f);
@@ -41,6 +37,10 @@ export struct CTransform {
         dirty = true;
     }
 
+    void rotate(const float x, const float y, const float z) {
+        rotation = glm::quat(glm::vec3(glm::radians(x), glm::radians(y), glm::radians(z)));
+    }
+
     SceneGraphTypes::Transform toSceneTransform() const {
         return SceneGraphTypes::Transform {
             .translation = position,
@@ -50,7 +50,7 @@ export struct CTransform {
     }
 };
 
-export struct CMesh {
+export struct Mesh {
     AssetInstance instance {};
     bool outOfDate = true;
 };
@@ -66,10 +66,10 @@ export enum class LightType : uint32_t {
     Spotlight
 };
 
-export struct CLight {
+export struct Light {
     uint32_t transformIndex = INDEX_UNSET;
-    glm::vec3 color {1.0f, 1.0f, 1.0f};
-    float intensity {1.0f};
+    glm::vec3 color { 1.0f, 1.0f, 1.0f };
+    float intensity { 1.0f };
     uint32_t index = INDEX_UNSET;
     LightType type = LightType::Point;
     bool enabled = true;
@@ -78,3 +78,4 @@ export struct CLight {
     // TODO remove?
     AssetInstance cubeDisplay {};
 };
+}

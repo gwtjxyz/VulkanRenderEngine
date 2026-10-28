@@ -543,11 +543,19 @@ private:
                 assert(transform);
 
                 static float transformPosWidgetData[3] {};
+                static glm::vec3 rotationAngles;
+                static float transformRotWidgetData[3] {};
                 static float transformScaleWidgetData {};
                 if (previouslySelectedObject != selectedObject) {
                     transformPosWidgetData[0] = transform->position.x;
                     transformPosWidgetData[1] = transform->position.y;
                     transformPosWidgetData[2] = transform->position.z;
+
+                    rotationAngles = glm::degrees(glm::eulerAngles(transform->rotation));
+
+                    transformRotWidgetData[0] = rotationAngles.x;
+                    transformRotWidgetData[1] = rotationAngles.y;
+                    transformRotWidgetData[2] = rotationAngles.z;
 
                     transformScaleWidgetData = transform->scale.x;
 
@@ -555,6 +563,7 @@ private:
                 }
 
                 ImGui::DragFloat3("Object position", transformPosWidgetData, 0.005f, -1000.0f, 1000.0f, "%.3f");
+                ImGui::DragFloat3("Object rotation", transformRotWidgetData, 0.1f, -360.0f, 360.0f, "%.1f");
                 ImGui::DragFloat("Object scale", &transformScaleWidgetData, 0.005f, 0.0f, 1000.0f, "%.3f");
 
                 constexpr float tolerance = 0.001f;
@@ -562,7 +571,18 @@ private:
                     isDifferentEnough(transform->position.y, transformPosWidgetData[1], tolerance) ||
                     isDifferentEnough(transform->position.z, transformPosWidgetData[2], tolerance)) {
                     m_EntitySystem.setPosition(objectName, { transformPosWidgetData[0], transformPosWidgetData[1], transformPosWidgetData[2] });
-                    }
+                }
+
+                const float pitch = glm::degrees(glm::pitch(transform->rotation));
+                const float yaw = glm::degrees(glm::yaw(transform->rotation));
+                const float roll = glm::degrees(glm::roll(transform->rotation));
+
+                if (isDifferentEnough(pitch, transformRotWidgetData[0], tolerance) ||
+                    isDifferentEnough(yaw, transformRotWidgetData[1], tolerance) ||
+                    isDifferentEnough(roll, transformRotWidgetData[2], tolerance)) {
+                    m_EntitySystem.setRotation(objectName, transformRotWidgetData[0], transformRotWidgetData[1], transformRotWidgetData[2]);
+                }
+
                 if (isDifferentEnough(transform->scale.x, transformScaleWidgetData, tolerance)) {
                     m_EntitySystem.setScale(objectName, transformScaleWidgetData);
                 }
@@ -595,8 +615,6 @@ private:
 
             ImGui::ColorEdit4("Light Color", lightColor);
             ImGui::PopItemWidth();
-
-
         }
 
         ImGui::End();
@@ -622,7 +640,7 @@ private:
         float time = std::chrono::duration<float>(currentTime - startTime).count();
 
         if (m_IsModelSpinEnabled) {
-            m_EntitySystem.rotate(VIKING_ROOM_ENTITY_NAME, 0, time * 90.0f, 0.0f);
+            m_EntitySystem.addRotation(VIKING_ROOM_ENTITY_NAME, 0, time * 90.0f, 0.0f);
         }
 
         if (m_LightMode != LightMode::Off) {

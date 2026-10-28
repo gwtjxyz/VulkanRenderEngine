@@ -27,8 +27,8 @@ import glm;
 export class EntitySystem {
 public:
     EntitySystem() {
-        m_ObjectPrefab = m_World.prefab("Prefab_Object").set(CTransform {}).set(CMesh {});
-        m_LightPrefab = m_World.prefab("Prefab_Light").set(CLight {}).set(CTransform {});
+        m_ObjectPrefab = m_World.prefab("Prefab_Object").set(Components::Transform {}).set(Components::Mesh {});
+        m_LightPrefab = m_World.prefab("Prefab_Light").set(Components::Light {}).set(Components::Transform {});
 
         prepareLightSystem();
         prepareObjectSystem();
@@ -40,92 +40,101 @@ public:
     // TODO modularize
     void setupWorld(AssetManager & assetManager) {
         // Spinning room
-        auto roomEntity = m_World.entity(VIKING_ROOM_ENTITY_NAME.c_str()).is_a(m_ObjectPrefab);
-        auto & roomTransform = roomEntity.get_mut<CTransform>();
-        roomTransform.position = { 0.0f, -0.5f, -2.0f };
-        roomTransform.rotateX(-90.0f);
-
-        auto & roomMesh = roomEntity.get_mut<CMesh>();
-        auto * vikingRoomAssetHandle = assetManager.getOrCreateAsset(VIKING_ROOM_MODEL_NAME);
-        assert(vikingRoomAssetHandle);
-        vikingRoomAssetHandle->load();
-        roomMesh.instance = AssetInstance(vikingRoomAssetHandle);
-        roomMesh.instance.load();
-
-        // TODO remove - temporary
-        m_WorldObjects.emplace_back(VIKING_ROOM_ENTITY_NAME.c_str());
+        createObject(
+            assetManager,
+            VIKING_ROOM_ENTITY_NAME,
+            VIKING_ROOM_MODEL_NAME,
+            { 0.0f, -0.5f, -2.0f },
+            { -90.0f, 0.0f, 0.0f }
+        );
 
         // Non-spinning room (asset instancing test)
-        auto roomEntity2 = m_World.entity(VIKING_ROOM_2_ENTITY_NAME.c_str()).is_a(m_ObjectPrefab);
-        auto & roomTransform2 = roomEntity2.get_mut<CTransform>();
-        roomTransform2.position = { 3.5f, 0.5f, 0.5f };
-        roomTransform2.rotateX(-90.0f);
-        roomTransform2.rotateZ(45.0f);
-
-        auto & roomMesh2 = roomEntity2.get_mut<CMesh>();
-        roomMesh2.instance = AssetInstance(vikingRoomAssetHandle);
-        roomMesh2.instance.load();
-
-        // TODO remove - temporary
-        m_WorldObjects.emplace_back(VIKING_ROOM_2_ENTITY_NAME.c_str());
+        createObject(
+            assetManager,
+            VIKING_ROOM_2_ENTITY_NAME,
+            VIKING_ROOM_MODEL_NAME,
+            { 3.5f, 0.5f, 0.5f },
+            { -90.0f, 160.0f, 50.0f }
+        );
 
         // Terrain
-        auto terrainEntity = m_World.entity(TERRAIN_ENTITY_NAME.c_str()).is_a(m_ObjectPrefab);
-        auto & terrainTransform = terrainEntity.get_mut<CTransform>();
-        terrainTransform.position = { -20.0f, -15.0f, 30.0f };
-        terrainTransform.scale = glm::vec3(0.1f);
-
-        auto & terrainMesh = terrainEntity.get_mut<CMesh>();
-        auto * terrainAssetHandle = assetManager.getOrCreateAsset(TERRAIN_MODEL_NAME);
-        assert(terrainAssetHandle);
-        terrainAssetHandle->load();
-        terrainMesh.instance = AssetInstance(terrainAssetHandle);
-        terrainMesh.instance.load();
-
-        // TODO remove - temporary
-        m_WorldObjects.emplace_back(TERRAIN_ENTITY_NAME.c_str());
-
-        // Castle on hills (TODO change/remove - temp setup for testing for now)
-        auto castleEntity = m_World.entity(CASTLE_ENTITY_NAME.c_str()).is_a(m_ObjectPrefab);
-        auto & castleTransform = castleEntity.get_mut<CTransform>();
-        castleTransform.position = { -6.0f, -11.5f, -13.0f };
-        castleTransform.scale = glm::vec3(1.0f);
-
-        auto & castleMesh = castleEntity.get_mut<CMesh>();
-        auto * castleAssetHandle = assetManager.getOrCreateAsset(CASTLE_MODEL_NAME);
-        assert(castleAssetHandle);
-        castleAssetHandle->load();
-        castleMesh.instance = AssetInstance(castleAssetHandle);
-        castleMesh.instance.load();
-
-        // TODO remove - temporary
-        m_WorldObjects.emplace_back(CASTLE_ENTITY_NAME.c_str());
-
-        // Import cube for light source display
-        auto * cubeAssetHandle = assetManager.getOrCreateAsset(CUBE_MODEL_NAME);
-        cubeAssetHandle->load();
-        m_LightCubeAsset = cubeAssetHandle;
-
-        auto cubeTransform = SceneGraphTypes::Transform {
+        createObject(
+            assetManager,
+            TERRAIN_ENTITY_NAME,
+            TERRAIN_MODEL_NAME,
+            { -20.0f, -15.0f, 30.0f },
             {},
-            {1.0f, 0.0f, 0.0f, 0.0f},
-            {0.1f, 0.1f, 0.1f}
-        };
-        m_LightCubeAsset->updateSceneTransform(cubeTransform, TransformUpdateFlags::Scale, true);
+            0.1f
+        );
 
-        // Light source
-        auto lightEntity = m_World.entity(LIGHT_ENTITY_NAME.c_str()).is_a(m_LightPrefab);
-        auto & lightTransform = lightEntity.get_mut<CTransform>();
-        lightTransform.position = { 0.0f, -10.0f, 10.0f };
-        // TODO remove - temporary
-        auto & lightParams = lightEntity.get_mut<CLight>();
-        lightParams.cubeDisplay = AssetInstance(cubeAssetHandle);
-        lightParams.cubeDisplay.load();
+        // Castle on hills
+        createObject(
+            assetManager,
+            CASTLE_ENTITY_NAME,
+            CASTLE_MODEL_NAME,
+            { -6.0f, -11.5f, -13.0f }
+        );
 
-        // TODO remove - temporary
-        m_LightObjects.emplace_back(LIGHT_ENTITY_NAME.c_str());
+        createLight(assetManager, LIGHT_ENTITY_NAME, { 0.0f, -10.0f, 10.0f });
+    }
 
-        // TODO Setup callbacks
+    void createObject(
+        AssetManager & assetManager,
+        const std::string & name,
+        const std::string & modelName,
+        const glm::vec3 & position = { 0.0f, 0.0f, 0.0f },
+        const glm::vec3 & rotation = { 0.0f, 0.0f, 0.0f },
+        const float scale = 1.0f
+    ) {
+        const auto entity = m_World.entity(name.c_str()).is_a(m_ObjectPrefab);
+
+        auto & transform = entity.get_mut<Components::Transform>();
+        transform.position = position;
+        transform.rotation = glm::quat(glm::radians(rotation));
+        transform.scale = { scale, scale, scale };
+
+        auto & mesh = entity.get_mut<Components::Mesh>();
+        auto * assetHandle = assetManager.getOrCreateAsset(modelName);
+        assert(assetHandle);
+        assetHandle->load();
+
+        mesh.instance = AssetInstance(assetHandle);
+        mesh.instance.load();
+
+        m_WorldObjects.emplace_back(name.c_str());
+    }
+
+    void createLight(
+        AssetManager & assetManager,
+        const std::string & name,
+        const glm::vec3 & position = { 0.0f, 0.0f, 0.0f },
+        const glm::vec3 & rotation = { 0.0f, 0.0f, 0.0f }
+    ) {
+        const auto entity = m_World.entity(name.c_str()).is_a(m_LightPrefab);
+
+        auto & transform = entity.get_mut<Components::Transform>();
+        transform.position = position;
+        transform.rotation = rotation;
+
+        auto * cubeAssetHandle = assetManager.getOrCreateAsset(CUBE_MODEL_NAME);
+        assert(cubeAssetHandle);
+
+        // Load in and scale down the cube if it isn't loaded yet
+        if (!cubeAssetHandle->isLoaded()) {
+            cubeAssetHandle->load();
+            auto cubeTransform = SceneGraphTypes::Transform {
+                {},
+                { 1.0f, 0.0f, 0.0f, 0.0f },
+                { 0.1f, 0.1f, 0.1f }
+            };
+            cubeAssetHandle->updateSceneTransform(cubeTransform, TransformUpdateFlags::Scale, true);
+        }
+
+        auto & light = entity.get_mut<Components::Light>();
+        light.cubeDisplay = AssetInstance(cubeAssetHandle);
+        light.cubeDisplay.load();
+
+        m_LightObjects.emplace_back(name.c_str());
     }
 
     void prepareAndRender(const uint32_t frameIndex, const bool drawLightCubes) const {
@@ -143,7 +152,7 @@ public:
 
     void setPosition(const std::string & entityName, const glm::vec3 pos) const {
         const auto entity = m_World.lookup(entityName.c_str());
-        if (auto * t = entity.try_get_mut<CTransform>()) {
+        if (auto * t = entity.try_get_mut<Components::Transform>()) {
             t->position = pos;
             t->dirty = true;
         }
@@ -151,7 +160,7 @@ public:
 
     void setPosition(const char * entityName, const glm::vec3 newPos) const {
         const auto entity = m_World.lookup(entityName);
-        if (auto * t = entity.try_get_mut<CTransform>()) {
+        if (auto * t = entity.try_get_mut<Components::Transform>()) {
             t->position = newPos;
             t->dirty = true;
         }
@@ -159,15 +168,23 @@ public:
 
     void setScale(const char * entityName, const float newScale) const {
         const auto entity = m_World.lookup(entityName);
-        if (auto * t = entity.try_get_mut<CTransform>()) {
-            t->scale = {newScale, newScale, newScale};
+        if (auto * t = entity.try_get_mut<Components::Transform>()) {
+            t->scale = { newScale, newScale, newScale };
             t->dirty = true;
         }
     }
 
-    void rotate(const std::string & entityName, const float rotX, const float rotY, const float rotZ) const {
+    void setRotation(const std::string & entityName, const float rotX, const float rotY, const float rotZ) const {
         const auto entity = m_World.lookup(entityName.c_str());
-        if (auto * t = entity.try_get_mut<CTransform>()) {
+        if (auto * t = entity.try_get_mut<Components::Transform>()) {
+            t->rotate(rotX, rotY, rotZ);
+            t->dirty = true;
+        }
+    }
+
+    void addRotation(const std::string & entityName, const float rotX, const float rotY, const float rotZ) const {
+        const auto entity = m_World.lookup(entityName.c_str());
+        if (auto * t = entity.try_get_mut<Components::Transform>()) {
             t->rotateX(rotX);
             t->rotateY(rotY);
             t->rotateZ(rotZ);
@@ -183,20 +200,20 @@ public:
         return m_LightObjects;
     }
 
-    const CTransform * getTransform(const char * objectName) const {
+    const Components::Transform * getTransform(const char * objectName) const {
         const auto entity = m_World.lookup(objectName);
-        return entity.try_get<CTransform>();
+        return entity.try_get<Components::Transform>();
     }
 
-    const CLight * getLight(const char * objectName) const {
+    const Components::Light * getLight(const char * objectName) const {
         const auto entity = m_World.lookup(objectName);
-        return entity.try_get<CLight>();
+        return entity.try_get<Components::Light>();
     }
 
 private:
     void prepareLightSystem() {
-        m_LightPrepareSystem = m_World.system<CLight, CTransform>().each(
-            [this](flecs::iter & it, size_t, CLight & l, CTransform & t) {
+        m_LightPrepareSystem = m_World.system<Components::Light, Components::Transform>().each(
+            [this](flecs::iter & it, size_t, Components::Light & l, Components::Transform & t) {
                 auto * deviceMapper = DeviceMapperLocator::locate();
                 // set up indices if they were unset before
                 if (l.index == INDEX_UNSET) {
@@ -228,8 +245,8 @@ private:
     }
 
     void prepareObjectSystem() {
-        m_ObjectPrepareSystem = m_World.system<CTransform, CMesh>().each(
-            [this](flecs::iter & it, size_t row, CTransform & t, CMesh & m) {
+        m_ObjectPrepareSystem = m_World.system<Components::Transform, Components::Mesh>().each(
+            [this](flecs::iter & it, size_t row, Components::Transform & t, Components::Mesh & m) {
                 if (!m.instance.getAsset() || !m.instance.isLoaded()) {
                     return;
                 }
@@ -244,8 +261,8 @@ private:
     }
 
     void prepareRenderSystem() {
-        m_RenderSystem = m_World.system<CTransform, CMesh>().each(
-            [this](flecs::iter & it, size_t row, CTransform & t, CMesh & m) {
+        m_RenderSystem = m_World.system<Components::Transform, Components::Mesh>().each(
+            [this](flecs::iter & it, size_t row, Components::Transform & t, Components::Mesh & m) {
                 if (!m.instance.getAsset() || !m.instance.isLoaded()) {
                     return;
                 }
@@ -264,9 +281,9 @@ private:
 
     // TODO change - very hacky, this should ideally use instanced rendering and probably not be a separate system
     void prepareLightCubeSystem() {
-        m_LightCubeSystem = m_World.system<CTransform, CLight>().each(
-            [this](flecs::iter & it, size_t row, CTransform & t, CLight & l) {
-                if (!m_LightCubeAsset || !m_LightCubeAsset->isLoaded() || !l.cubeDisplay.isLoaded()) {
+        m_LightCubeSystem = m_World.system<Components::Transform, Components::Light>().each(
+            [this](flecs::iter & it, size_t row, Components::Transform & t, Components::Light & l) {
+                if (!l.cubeDisplay.isLoaded()) {
                     return;
                 }
 
@@ -282,17 +299,18 @@ private:
                         pipelineManager->executeDrawCall(drawCall);
                     }
                 }
-            });
+            }
+        );
     }
 
-    static void mapTransform(CTransform & t, DeviceMapper * deviceMapper) {
+    static void mapTransform(Components::Transform & t, DeviceMapper * deviceMapper) {
         auto * transformPtr = deviceMapper->getTransform(t.index);
         transformPtr->layout.position = glm::vec4(t.position, 1.0f);
         transformPtr->layout.rotation = glm::vec4(t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w);
         transformPtr->layout.scale = glm::vec4(t.scale, 0.0f);
     }
 
-    static SceneGraphTypes::Transform toSceneGraphTransform(const CTransform & transform) {
+    static SceneGraphTypes::Transform toSceneGraphTransform(const Components::Transform & transform) {
         return { transform.position, transform.rotation, transform.scale };
     }
 
@@ -308,7 +326,6 @@ private:
 
     // TODO change - temporary solution, not very clean
     flecs::system m_LightCubeSystem;
-    Asset * m_LightCubeAsset = nullptr;
 
     std::vector<const char *> m_WorldObjects {};
     std::vector<const char *> m_LightObjects {};
