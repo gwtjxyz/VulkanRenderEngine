@@ -75,7 +75,7 @@ public:
             { -6.0f, -11.5f, -13.0f }
         );
 
-        createLight(assetManager, LIGHT_ENTITY_NAME, { 0.0f, -10.0f, 10.0f });
+        createLight(assetManager, { 0.0f, -10.0f, 10.0f });
     }
 
     void createObject(
@@ -106,10 +106,13 @@ public:
 
     void createLight(
         AssetManager & assetManager,
-        const std::string & name,
         const glm::vec3 & position = { 0.0f, 0.0f, 0.0f },
         const glm::vec3 & rotation = { 0.0f, 0.0f, 0.0f }
     ) {
+        // Give the light a unique name
+        const std::string name = LIGHT_ENTITY_NAME + std::to_string(m_CreatedLights);
+        m_CreatedLights++;
+
         const auto entity = m_World.entity(name.c_str()).is_a(m_LightPrefab);
 
         auto & transform = entity.get_mut<Components::Transform>();
@@ -134,7 +137,34 @@ public:
         light.cubeDisplay = AssetInstance(cubeAssetHandle);
         light.cubeDisplay.load();
 
-        m_LightObjects.emplace_back(name.c_str());
+        m_LightObjects.emplace_back(std::move(name));
+    }
+
+    void removeLight(AssetManager & assetManager, int lightIndex) {
+        assert(lightIndex >= 0);
+        auto & name = m_LightObjects.at(lightIndex);
+        auto entity = m_World.lookup(name.c_str());
+        if (entity != 0 && entity.is_a(m_LightPrefab)) {
+            auto * deviceMapper = DeviceMapperLocator::locate();
+
+            auto & l = entity.get_mut<Components::Light>();
+            deviceMapper->removeLight(l.index);
+            l.cubeDisplay.unload();
+            auto & t = entity.get_mut<Components::Transform>();
+            deviceMapper->removeTransform(t.index);
+
+            entity.destruct();
+        }
+
+        std::vector<std::string> newLightObjectsList;
+        size_t i = 0;
+        for (const auto & it : m_LightObjects) {
+            if (i != lightIndex) {
+                newLightObjectsList.emplace_back(it);
+            }
+            ++i;
+        }
+        m_LightObjects = newLightObjectsList;
     }
 
     void prepareAndRender(const uint32_t frameIndex, const bool drawLightCubes) const {
@@ -192,11 +222,37 @@ public:
         }
     }
 
+    void setColor(const std::string & entityName, const float colors[3]) const {
+        const auto entity = m_World.lookup(entityName.c_str());
+        if (auto * l = entity.try_get_mut<Components::Light>()) {
+            l->color.r = colors[0];
+            l->color.g = colors[1];
+            l->color.b = colors[2];
+            l->dirty = true;
+        }
+    }
+
+    void setIntensity(const std::string & entityName, const float intensity) const {
+        const auto entity = m_World.lookup(entityName.c_str());
+        if (auto * l = entity.try_get_mut<Components::Light>()) {
+            l->intensity = intensity;
+            l->dirty = true;
+        }
+    }
+
+    void setLightType(const std::string & entityName, const Components::LightType type) const {
+        const auto entity = m_World.lookup(entityName.c_str());
+        if (auto * l = entity.try_get_mut<Components::Light>()) {
+            l->type = type;
+            l->dirty = true;
+        }
+    }
+
     const std::vector<const char *> & getObjectNames() const {
         return m_WorldObjects;
     }
 
-    const std::vector<const char *> & getLightNames() const {
+    const std::vector<std::string> & getLightNames() const {
         return m_LightObjects;
     }
 
@@ -327,6 +383,10 @@ private:
     // TODO change - temporary solution, not very clean
     flecs::system m_LightCubeSystem;
 
+    // TODO change to vector of strings so we can add arbitrary objects at runtime
     std::vector<const char *> m_WorldObjects {};
-    std::vector<const char *> m_LightObjects {};
+
+    std::vector<std::string> m_LightObjects {};
+
+    uint32_t m_CreatedLights = 0;
 };

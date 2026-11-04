@@ -56,7 +56,7 @@ export struct Mesh {
 };
 
 // TODO finish
-export enum class LightType : uint32_t {
+export enum class LightType : int32_t {
     // Global light that has a direction from where the light is coming from
     // Position is ignored
     Directional = 0,
@@ -67,7 +67,6 @@ export enum class LightType : uint32_t {
 };
 
 export struct Light {
-    uint32_t transformIndex = INDEX_UNSET;
     glm::vec3 color { 1.0f, 1.0f, 1.0f };
     float intensity { 1.0f };
     uint32_t index = INDEX_UNSET;

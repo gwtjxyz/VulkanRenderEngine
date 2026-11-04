@@ -38,7 +38,7 @@ export const std::string CASTLE_MODEL_NAME = "scene.gltf";
 export const std::string CASTLE_MATERIAL_NAME = "castle";
 export const std::string CASTLE_ENTITY_NAME = "castle";
 
-export const std::string LIGHT_ENTITY_NAME = "light1";
+export const std::string LIGHT_ENTITY_NAME = "light_";
 
 export const std::string GRAPHICS_PIPELINE_NAME = "graphics";
 export const std::string POINT_GRAPHICS_PIPELINE_NAME = "point_graphics";

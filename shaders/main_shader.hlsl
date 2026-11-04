@@ -76,7 +76,7 @@ VSOutput VSMain(VSInput input) {
     float4x4 modelMatrix = mul(instanceMatrix, sceneMatrix);
 
     output.pos = mul(vertexConstants.projection, mul(vertexConstants.view, mul(modelMatrix, float4(input.inPosition.xyz, 1.0))));
-    output.normal = mul(mul(vertexConstants.view, modelMatrix), float4(input.inNormal, 0.0));
+    output.normal = normalize(mul(mul(vertexConstants.view, modelMatrix), float4(input.inNormal, 0.0)));
     output.UV = input.inUV;
 
     output.fragPos = mul(mul(vertexConstants.view, modelMatrix), float4(input.inPosition.xyz, 1.0));

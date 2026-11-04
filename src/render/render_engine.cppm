@@ -511,22 +511,6 @@ private:
                 ImGui::Checkbox("Particles enabled", &m_ParticlesEnabled);
                 ImGui::EndTable();
             }
-            ImGui::Spacing();
-            static float lightPosWidgetData[3] {
-                m_LightPosition.x, m_LightPosition.y, m_LightPosition.z
-            };
-            if (m_LightMode == LightMode::Off) {
-                ImGui::BeginDisabled();
-            }
-
-            ImGui::DragFloat3("Light position", lightPosWidgetData, 0.005f, -20.0f, 20.0f, "%.3f");
-            m_LightPosition.x = lightPosWidgetData[0];
-            m_LightPosition.y = lightPosWidgetData[1];
-            m_LightPosition.z = lightPosWidgetData[2];
-
-            if (m_LightMode == LightMode::Off) {
-                ImGui::EndDisabled();
-            }
         }
 
         ImGui::Spacing();
@@ -596,25 +580,131 @@ private:
             static int selectedLight = -1;
             static int previouslySelectedLight = selectedLight;
             const float spacing = ImGui::GetStyle().ItemInnerSpacing.x + 5.0f;
-            ImGui::Text("Light Count: XX");
+
+            static auto lightCount = m_EntitySystem.getLightNames().size();
+
+            ImGui::Text("Light Count: %llu", lightCount);
             ImGui::SameLine(0.0f, spacing);
             if (ImGui::Button("Add")) {
-                // TODO
+                m_EntitySystem.createLight(m_AssetManager);
+                selectedLight = m_EntitySystem.getLightNames().size() - 1;
+                lightCount++;
+
+                m_LightNamesOutOfDate = true;
             }
             ImGui::SameLine(0.0f, spacing);
             ImGui::Checkbox("Draw light cubes", &m_DrawLightCubes);
 
-            // Light properties
-            static float lightPos[3];
-            static float lightDirection[3];
-            static float lightColor[4];
+            if (m_LightNamesOutOfDate) {
+                m_LightNames.clear();
 
-            ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.5f);
-            ImGui::DragFloat3("Position", lightPos, 0.005f, -20.0f, 20.0f, "%.3f");
-            ImGui::DragFloat3("Direction", lightDirection, 0.5f, -360.0f, 360.0f, "%.1f");
+                const auto & lightStrings = m_EntitySystem.getLightNames();
+                for (const auto & s : lightStrings) {
+                    m_LightNames.push_back(s.c_str());
+                }
+                m_LightNamesOutOfDate = false;
+            }
 
-            ImGui::ColorEdit4("Light Color", lightColor);
-            ImGui::PopItemWidth();
+            ImGui::Combo("Light", &selectedLight, m_LightNames.data(), m_LightNames.size());
+            if (selectedLight != -1) {
+                // Light properties
+
+                const auto * lightName = m_LightNames.at(selectedLight);
+                const auto * lightComponent = m_EntitySystem.getLight(lightName);
+                assert(lightComponent);
+                const auto * transformComponent = m_EntitySystem.getTransform(lightName);
+                assert(transformComponent);
+
+                static float lightPos[3];
+                static glm::vec3 lightDirAngles;
+                static float lightDirection[3];
+                static float lightColor[4];
+                static int32_t lightType = 0;
+                if (previouslySelectedLight != selectedLight) {
+                    lightPos[0] = transformComponent->position.x;
+                    lightPos[1] = transformComponent->position.y;
+                    lightPos[2] = transformComponent->position.z;
+
+                    lightDirAngles = glm::degrees(glm::eulerAngles(transformComponent->rotation));
+
+                    lightDirection[0] = lightDirAngles.x;
+                    lightDirection[1] = lightDirAngles.y;
+                    lightDirection[2] = lightDirAngles.z;
+
+                    lightColor[0] = lightComponent->color.r;
+                    lightColor[1] = lightComponent->color.g;
+                    lightColor[2] = lightComponent->color.b;
+                    lightColor[3] = lightComponent->intensity;
+
+                    lightType = static_cast<uint32_t>(lightComponent->type);
+
+                    previouslySelectedLight = selectedLight;
+                }
+
+                constexpr float tolerance = 0.001f;
+                if (isDifferentEnough(transformComponent->position.x, lightPos[0], tolerance) ||
+                    isDifferentEnough(transformComponent->position.y, lightPos[1], tolerance) ||
+                    isDifferentEnough(transformComponent->position.z, lightPos[2], tolerance)) {
+                    m_EntitySystem.setPosition(lightName, { lightPos[0], lightPos[1], lightPos[2] });
+                }
+
+                const float pitch = glm::degrees(glm::pitch(transformComponent->rotation));
+                const float yaw = glm::degrees(glm::yaw(transformComponent->rotation));
+                const float roll = glm::degrees(glm::roll(transformComponent->rotation));
+
+                if (isDifferentEnough(pitch, lightDirection[0], tolerance) ||
+                    isDifferentEnough(yaw, lightDirection[1], tolerance) ||
+                    isDifferentEnough(roll, lightDirection[2], tolerance)) {
+                    m_EntitySystem.setRotation(lightName, lightDirection[0], lightDirection[1], lightDirection[2]);
+                }
+
+                if (isDifferentEnough(lightComponent->color.r, lightColor[0], tolerance) ||
+                    isDifferentEnough(lightComponent->color.g, lightColor[1], tolerance) ||
+                    isDifferentEnough(lightComponent->color.b, lightColor[2], tolerance)) {
+                    m_EntitySystem.setColor(lightName, lightColor); // Will this work?
+                }
+
+                if (isDifferentEnough(lightComponent->intensity, lightColor[3], tolerance)) {
+                    m_EntitySystem.setIntensity(lightName, lightColor[3]);
+                }
+
+                if (lightType != static_cast<int32_t>(lightComponent->type)) {
+                    m_EntitySystem.setLightType(lightName, static_cast<Components::LightType>(lightType));
+                }
+
+                ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.5f);
+                ImGui::DragFloat3("Position", lightPos, 0.005f, -20.0f, 20.0f, "%.3f");
+                ImGui::DragFloat3("Direction", lightDirection, 0.5f, -360.0f, 360.0f, "%.1f");
+
+                ImGui::ColorEdit4("Light Color", lightColor);
+
+                const char * lightTypeLabel;
+                switch (auto lightTypeEnum = static_cast<Components::LightType>(lightType)) {
+                    case Components::LightType::Directional:
+                        lightTypeLabel = "Directional";
+                        break;
+                    case Components::LightType::Point:
+                        lightTypeLabel = "Point";
+                        break;
+                    case Components::LightType::Spotlight:
+                        lightTypeLabel = "Spotlight";
+                        break;
+                    default:
+                        lightTypeLabel = "Unknown";
+                        break;
+                }
+
+                ImGui::SliderInt("Light Type", &lightType, 0, 2, lightTypeLabel);
+
+                if (ImGui::Button("Delete Light")) {
+                    m_EntitySystem.removeLight(m_AssetManager, selectedLight);
+                    m_LightNamesOutOfDate = true;
+                    selectedLight = -1;
+                    lightCount--;
+                }
+
+                ImGui::PopItemWidth();
+            }
         }
 
         ImGui::End();
@@ -641,10 +731,6 @@ private:
 
         if (m_IsModelSpinEnabled) {
             m_EntitySystem.addRotation(VIKING_ROOM_ENTITY_NAME, 0, time * 90.0f, 0.0f);
-        }
-
-        if (m_LightMode != LightMode::Off) {
-            m_EntitySystem.setPosition(LIGHT_ENTITY_NAME, m_LightPosition);
         }
         startTime = currentTime;
     }
@@ -1120,13 +1206,15 @@ private:
     // Dynamic shader data
     LightMode m_LightMode = LightMode::Phong;
     bool m_ParticlesEnabled = true;
-    glm::vec4 m_LightPosition = { 0.0f, -10.0f, 10.0f, 0.0f };
 
     bool m_IsWindowFocused = true;
     bool m_ShouldCursorBeVisible = false;
     bool m_CanUiFocusBeToggled = false;     // Seems janky, should probably move to a more robust input state handling method later
     bool m_IsModelSpinEnabled = true;
     bool m_DrawLightCubes = false;
+
+    std::vector<const char *> m_LightNames {};
+    bool m_LightNamesOutOfDate = true;
 
     GLFWwindow * m_Window = nullptr;
 

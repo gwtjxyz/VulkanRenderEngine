@@ -245,6 +245,10 @@ public:
     void removeLight(const uint32_t lightIndex) {
         MappedBufferGroup & lightBuffer = m_MappedBuffers[MappedBufferType::Light];
 
+        auto & light = m_Lights.at(lightIndex);
+        light.layout.enabled = false;
+        light.layout.transformIndex = INDEX_UNSET;
+
         lightBuffer.occupied.at(lightIndex) = false;
         lightBuffer.objectCount--;
     }
