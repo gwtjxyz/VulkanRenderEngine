@@ -52,7 +52,8 @@ private:
     // Need to be careful with this - push constant size is limited
     // NOTE: Order of variables here has to be the exact same as on GPU side!
     struct VertexPushConstants {
-        // Set this before rendering entities
+        // Set these before rendering entities
+        glm::vec4 cameraPos;
         glm::mat4 projection;
         glm::mat4 view;
 
@@ -421,7 +422,8 @@ public:
         m_VertexPushConstants.lightMode = lightMode;
     }
 
-    void setProjectionView(const glm::mat4 & projectionMatrix, const glm::mat4 & viewMatrix) {
+    void setCameraVariables(const glm::vec3 & cameraPos, const glm::mat4 & projectionMatrix, const glm::mat4 & viewMatrix) {
+        m_VertexPushConstants.cameraPos = glm::vec4(cameraPos, 1.0f);
         m_VertexPushConstants.projection = projectionMatrix;
         // Vulkan's Y coordinate is flipped compared to OpenGL
         // and glm was designed with OpenGL in mind

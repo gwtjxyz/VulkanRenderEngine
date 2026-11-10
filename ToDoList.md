@@ -8,7 +8,6 @@
 - Better logging and performance metrics
 - Skybox
 - GPU Memory debug window
-- Adding arbitrary lights at runtime
 
 ## Backlog
 
@@ -51,3 +50,4 @@
 - Bindless textures using descriptor indexing and buffer device address extensions
 - Bindless transform, material and light access
 - Placeholder textures
+- Multiple light sources and adding/removing light sources at runtime

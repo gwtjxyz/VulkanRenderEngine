@@ -75,7 +75,7 @@ public:
             { -6.0f, -11.5f, -13.0f }
         );
 
-        createLight(assetManager, { 0.0f, -10.0f, 10.0f });
+        createLight(assetManager, { 0.0f, -1.0f, 10.0f });
     }
 
     void createObject(

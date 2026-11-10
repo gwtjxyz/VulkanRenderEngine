@@ -28,6 +28,16 @@ check the [To-Do list](ToDoList.md) file.
 
 ## Examples
 
+### Phong multilight shading
+![image](readme/phong.png)
+
+### Gooch multilight shading
+![image](readme/gooch.png)
+
+### Model loading
+
 ![image](readme/models.png)
+
+### Compute particles
 
 ![image](readme/particles.png)

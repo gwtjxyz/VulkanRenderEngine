@@ -34,9 +34,9 @@ float4x4 quatToRotMat(float4 q) {
     // Written using GLM as reference
     float4x4 result = identity();
 
-    float qxx = pow(q.x, 2);
-    float qyy = pow(q.y, 2);
-    float qzz = pow(q.z, 2);
+    float qxx = q.x * q.x;
+    float qyy = q.y * q.y;
+    float qzz = q.z * q.z;
     float qxz = q.x * q.z;
     float qxy = q.x * q.y;
     float qyz = q.y * q.z;

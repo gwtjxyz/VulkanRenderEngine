@@ -25,9 +25,10 @@ float distanceMultiplier(float distance, float intensity) {
 
 // Obviously very inefficient (storing flags as uints instead of bits), but for just toying around it's not a big deal
 struct VSOutput {
-    float4 pos : SV_POSITION;
-    float4 normal : NORMAL0;
+    float4 pos : SV_POSITION;                       // Vertex position
+    float4 normal : NORMAL0;                        // Vertex normal
     float2 UV: TEXCOORD0;
+    float4 cameraPos : CAMERA_POS;
     float4 fragPos : FRAG_POS;
     int lightMode : LIGHT_MODE;
 
@@ -75,21 +76,20 @@ VSOutput VSMain(VSInput input) {
 
     float4x4 modelMatrix = mul(instanceMatrix, sceneMatrix);
 
+    // Move vertex position into camera space
     output.pos = mul(vertexConstants.projection, mul(vertexConstants.view, mul(modelMatrix, float4(input.inPosition.xyz, 1.0))));
-    output.normal = normalize(mul(mul(vertexConstants.view, modelMatrix), float4(input.inNormal, 0.0)));
+    // Move normal into world space
+    // Don't need to do inverse-transpose or similar corrections because we
+    // currently do not apply non-uniform scaling or shearing transforms
+    output.normal = normalize(mul(modelMatrix, float4(input.inNormal, 0.0)));   // Note: can also normalize by dividing by the scale factor
+//    output.normal = mul(modelMatrix, float4(input.inNormal, 0.0)) / instanceTransformData.scale.x;
     output.UV = input.inUV;
 
-    output.fragPos = mul(mul(vertexConstants.view, modelMatrix), float4(input.inPosition.xyz, 1.0));
-    // Do we need fragment push constants now too for this?
-    // Actually can just send it over to PSMain from here
-    // and then inside PSMain we will do something like
-    //
-    // float4 output;
-    // for (int i = 0; i < lightCount; ++i) {
-    //   output += lighting(...);
-    // }
-    // output.lightVec = (shaderData.lightPos.xyz - fragPos.xyz);
-    // output.viewVec = -fragPos.xyz;
+    // Camera pos is already in world space - no transformations needed
+    output.cameraPos = vertexConstants.cameraPos;
+
+    // Move fragment/pixel position into world space
+    output.fragPos = mul(modelMatrix, float4(input.inPosition.xyz, 1.0));
 
     output.lightMode = vertexConstants.lightMode;
 
@@ -107,44 +107,83 @@ float4 noLighting(float4 color) {
     return color;
 }
 
-float4 phongLighting(float4 color, float3 normal, float3 light, float3 view) {
-    float3 N = normalize(normal);
-    float3 L = normalize(light);
-    float3 V = normalize(view);
-    float3 R = reflect(-L, N);
+// Implementation of Gooch lighting that supports more than one light source
+float3 goochMultiLight(
+    uint lightCount,
+    uint64_t lightAddress, uint64_t transformAddress,
+    float4 cameraPos, float4 fragPos,
+    float4 surfaceColor,
+    float4 normal
+) {
+    float3 cool = float3(0.0, 0.0, 0.55) + 0.25 * surfaceColor.rgb;
+    float3 warm = float3(0.3, 0.3, 0) +  0.25 * surfaceColor.rgb;
+    float3 highlight = float3(2.0, 2.0, 2.0);
 
-    float3 diffuse = max(dot(N, L), 0.0);
-    float3 specular = dot(N, L) > 0.0 ?
-        pow(max(dot(R, V), 0.0), 16.0) * float3(0.75, 0.75, 0.75) :
-        float3(0.0, 0.0, 0.0);
+    float3 outColor = 0.5 * cool;
 
-    return float4(diffuse * color.rgb + specular, 1.0);
+    for (uint i = 0; i < lightCount; ++i) {
+        LightLayout lightData = rawVkBufferLoad<LightLayout>(lightAddress, i);
+
+        if (!lightData.enabled || lightData.transformIndex == UINT32_MAX) continue;
+
+        TransformLayout lightTransformData = rawVkBufferLoad<TransformLayout>(transformAddress, lightData.transformIndex);
+
+        float4 N = normalize(normal);
+        float4 V = normalize(cameraPos - fragPos);
+        float4 L = normalize(lightTransformData.position - fragPos);
+
+        float4 r_l = reflect(-L, N);
+        float s = saturate(100 * dot(r_l, V) - 97.0);
+
+        float NdL = saturate(dot(N, L));
+        float3 lit = lerp(warm, highlight, s);
+
+        outColor += NdL * lightData.color * lightData.intensity * lit;
+    }
+
+    return outColor;
 }
 
-float4 goochLighting(float4 color, float3 normal, float3 light, float3 view) {
-    float3 surface = color.rgb;
+// Implementation of Phong lighting that supports more than one light source
+float3 phongMultilight(
+    uint lightCount,
+    uint64_t lightAddress, uint64_t transformAddress,
+    float4 cameraPos, float4 fragPos,
+    float4 surfaceColor,
+    float4 normal
+) {
+    float3 outColor = surfaceColor.rgb * 0.4; // Ambient (pre-defined for now)
 
-    float3 one = float3(1.0, 1.0, 1.0);
+    for (uint i = 0; i < lightCount; ++i) {
+        LightLayout lightData = rawVkBufferLoad<LightLayout>(lightAddress, i);
 
-    float3 cool = float3(0.0, 0.0, 0.55) + surface * 0.25;
-    float3 warm = float3(0.3, 0.3, 0.0) + surface * 0.25;
-    float3 highlight = one;
+        if (!lightData.enabled || lightData.transformIndex == UINT32_MAX) continue;
 
-    float3 N = normalize(normal);
-    float3 L = normalize(light);
-    float3 V = normalize(view);
+        TransformLayout lightTransformData = rawVkBufferLoad<TransformLayout>(transformAddress, lightData.transformIndex);
 
-    float3 T = (dot(N, L) + one) * 0.5;
-    float3 R = reflect(-L, N); // same as 2 * N * dot(N, L) - L
-    float3 S = clamp(dot(R, V) * 100 - float3(97.0, 97.0, 97.0), 0.0, 1.0);
+        float4 N = normalize(normal);
+        float4 V = normalize(cameraPos - fragPos);
+        float4 L = normalize(lightTransformData.position - fragPos);
 
-    // formula without using lerp()
-    // float3 shaded = S * highlight + (one - S) * (T * warm + (one - T) * cool);
-    // formula with using lerp()
-    float3 warmCoolInterp = lerp(cool, warm, T);
-    float3 shaded = lerp(warmCoolInterp, highlight, S);
+        float4 r_l = reflect(-L, N);
 
-    return float4(shaded, 1.0);
+        // Pre-define specular and diffuse values as same for every light for now
+        // In the future use materials / diffuse textures / etc for this instead
+        float diffuseIntensity = 1.0;
+        float specularIntensity = 1.0;
+        float specularCoefficient = 16;
+
+        float3 diffuse = max(dot(N, L), 0.0) * diffuseIntensity;
+
+        float3 specular = specularIntensity * dot(r_l, V) > 0.0 ?
+            pow(dot(r_l, V), specularCoefficient) :
+            float3(0.0, 0.0, 0.0);
+
+        float3 intensities = lightData.intensity * lightData.color * (diffuse + specular);
+        outColor += surfaceColor.rgb * intensities;
+    }
+
+    return outColor;
 }
 
 float4 PSMain(VSOutput input) : SV_TARGET {
@@ -171,30 +210,16 @@ float4 PSMain(VSOutput input) : SV_TARGET {
     }
 
     // Ambient (default) light
-    color *= 0.4f;
+    color.rgb *= 0.4f;
 
-    // Iterate through all lights and apply them to the fragment
-    // TODO rework light formulas - right now things don't look quite right
-    for (uint i = 0; i < input.lightCount; ++i) {
-        LightLayout lightData = rawVkBufferLoad<LightLayout>(input.lightAddress, i);
+    if (input.lightMode == LIGHTING_MODE_GOOCH) {
+        color.rgb = goochMultiLight(input.lightCount, input.lightAddress, input.transformAddress, input.cameraPos, input.fragPos, color, input.normal);
 
-        if (!lightData.enabled || lightData.transformIndex == UINT32_MAX) continue;
+        return color;
+    } else if (input.lightMode == LIGHTING_MODE_PHONG) {
+        color.rgb = phongMultilight(input.lightCount, input.lightAddress, input.transformAddress, input.cameraPos, input.fragPos, color, input.normal);
 
-        TransformLayout transformData = rawVkBufferLoad<TransformLayout>(input.transformAddress, lightData.transformIndex);
-
-        float lightDst = distance(transformData.position, input.fragPos);
-        if (lightDst >= gMaxLightDst) continue;
-
-        float3 lightVec = transformData.position.xyz - input.fragPos.xyz;
-        float3 viewVec = -input.fragPos.xyz;
-
-        float intensity = distanceMultiplier(lightDst, lightData.intensity);
-
-        if (input.lightMode == LIGHTING_MODE_PHONG) {
-            color += intensity * float4(lightData.color, 1.0f) + phongLighting(color, input.normal.xyz, lightVec, viewVec);
-        } else if (input.lightMode == LIGHTING_MODE_GOOCH) {
-            color += intensity * float4(lightData.color, 1.0f) + goochLighting(color, input.normal.xyz, lightVec, viewVec);
-        }
+        return color;
     }
 
     return color;

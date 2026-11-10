@@ -1065,7 +1065,7 @@ private:
         commandBuffer.beginRendering(renderingInfo);
 
         // Set camera's projection matrix for rendering
-        m_PipelineManager->setProjectionView(m_Camera.getProjectionMatrix(), m_Camera.getViewMatrix());
+        m_PipelineManager->setCameraVariables(m_Camera.getPosition(), m_Camera.getProjectionMatrix(), m_Camera.getViewMatrix());
         // Set buffer device addresses
         m_PipelineManager->prepareAddressesForFrame(m_FrameIndex);
         m_PipelineManager->setParticlesEnabled(m_ParticlesEnabled);

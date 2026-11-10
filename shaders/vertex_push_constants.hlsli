@@ -45,6 +45,7 @@ struct MaterialLayout {
 
 // NOTE: Order of variables here has to be the exact same as on CPU side!
 struct VertexPushConstants {
+    float4 cameraPos;
     float4x4 projection;
     float4x4 view;
 
