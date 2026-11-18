@@ -1044,8 +1044,8 @@ private:
             .clearValue = clearDepth
         };
 
-        vk::RenderingInfo renderingInfo = {
-            .renderArea = { .offset = { 0, 0 }, .extent = m_SwapChainExtent },
+        const vk::RenderingInfo renderingInfo = {
+            .renderArea = { .offset = { .x = 0, .y = 0 }, .extent = m_SwapChainExtent },
             .layerCount = 1,
             .colorAttachmentCount = 1,
             .pColorAttachments = &colorAttachmentInfo,
@@ -1236,12 +1236,6 @@ private:
     uint64_t m_TimelineValue = 0;
     std::vector<vk::raii::Fence> m_InFlightFences {};
     uint32_t m_FrameIndex = 0;
-
-    // Note: the below setup is far from optimal; ideally we should allocate a single buffer
-    // and store both our vertex and index data in there, rather than creating individual buffers.
-    // It's also good to use a memory allocator on top of it all, like VMA. We are not doing it
-    // here because it would be slightly overkill for drawing just a couple simple shapes.
-    // We'll optimize this once there's an actual need/reason to do so.
 
     std::vector<VulkanComputeBufferData> m_ComputeDataBuffers {};
     ComputePushConstants m_ComputePushConstants {};

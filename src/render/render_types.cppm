@@ -27,18 +27,6 @@ export enum class LightMode : int32_t {
     Gooch = 2
 };
 
-// Replacement for UBOs that we address using "bindless" (buffer device address extension)
-export struct MeshData {
-    alignas(16) glm::mat4 projection;
-    alignas(16) glm::mat4 view;
-    alignas(16) glm::mat4 model;
-    alignas(16) uint32_t textureIndex = { 0 };
-};
-
-export struct LightData {
-    alignas(16) glm::vec4 lightPos {};
-};
-
 export struct Particle {
     glm::vec4 position;
     glm::vec4 color;

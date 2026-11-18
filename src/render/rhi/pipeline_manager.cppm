@@ -195,7 +195,7 @@ public:
 
         vk::PushConstantRange pushConstantRange = {
             .stageFlags = vk::ShaderStageFlagBits::eVertex,
-            .size = PipelineManager::getVertexPushConstantsSize()
+            .size = sizeof(VertexPushConstants)
         };
 
         auto * descriptorManager = DescriptorManagerLocator::locate();
@@ -326,7 +326,7 @@ public:
 
         vk::PushConstantRange pushConstantRange = {
             .stageFlags = vk::ShaderStageFlagBits::eVertex,
-            .size = PipelineManager::getVertexPushConstantsSize()
+            .size = sizeof(VertexPushConstants)
         };
 
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo {
@@ -371,14 +371,6 @@ public:
         };
 
         m_PipelineMap.insert({POINT_GRAPHICS_PIPELINE_NAME, std::move(newPipeline)});
-    }
-
-    VertexPushConstants * getVertexPushConstants() {
-        return &m_VertexPushConstants;
-    }
-
-    static uint32_t getVertexPushConstantsSize() {
-        return sizeof(VertexPushConstants);
     }
 
     void setAndBindActivePipeline(const std::string & pipelineName) {
