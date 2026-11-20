@@ -189,6 +189,7 @@ target_sources(VulkanRenderEngine PUBLIC
         src/core/platform.cppm src/core/input.cppm src/core/hlsl_compiler.cppm src/core/constants.cppm src/core/bit_flags.cppm src/core/core_types.cppm
         src/entity/entity_system.cppm src/entity/components.cppm
         src/resource/model_parser.cppm src/resource/scene_graph_types.cppm src/resource/asset_manager.cppm src/resource/texture_manager.cppm
+        src/resource/maze_builder.cppm
         src/render/render_engine.cppm src/render/camera.cppm
         src/render/render_types.cppm
         src/render/rhi/vulkan_instance.cppm src/render/rhi/vulkan_resource_service.cppm

@@ -16,6 +16,7 @@ import constants;
 import core_types;
 import device_mapper;
 import pipeline_manager;
+import maze_builder;
 import render_types;
 import scene_graph_types;
 
@@ -24,11 +25,16 @@ import std;
 #endif
 import glm;
 
+// TODO think about making a locator for this
 export class EntitySystem {
 public:
     EntitySystem() {
         m_ObjectPrefab = m_World.prefab("Prefab_Object").set(Components::Transform {}).set(Components::Mesh {});
         m_LightPrefab = m_World.prefab("Prefab_Light").set(Components::Light {}).set(Components::Transform {});
+
+        m_ObjectsQuery = m_World.query_builder<const Components::Transform, const Components::Mesh>()
+            .cached()
+            .build();
 
         prepareLightSystem();
         prepareObjectSystem();
@@ -39,41 +45,80 @@ public:
     // Creates all the entities that we will be drawing
     // TODO modularize
     void setupWorld(AssetManager & assetManager) {
-        // Spinning room
-        createObject(
-            assetManager,
-            VIKING_ROOM_ENTITY_NAME,
-            VIKING_ROOM_MODEL_NAME,
-            { 0.0f, -0.5f, -2.0f },
-            { -90.0f, 0.0f, 0.0f }
-        );
+        uint32_t innerMazeWidth = 30;
+        uint32_t innerMazeHeight = 30;
 
-        // Non-spinning room (asset instancing test)
-        createObject(
-            assetManager,
-            VIKING_ROOM_2_ENTITY_NAME,
-            VIKING_ROOM_MODEL_NAME,
-            { 3.5f, 0.5f, 0.5f },
-            { -90.0f, 160.0f, 50.0f }
-        );
+        m_MazeBuilder.setDimensions(innerMazeWidth, innerMazeHeight);
+        m_MazeBuilder.generateMaze();
+        m_MazeBuilder.printMazeToFile();
 
-        // Terrain
-        createObject(
-            assetManager,
-            TERRAIN_ENTITY_NAME,
-            TERRAIN_MODEL_NAME,
-            { -20.0f, -15.0f, 30.0f },
-            {},
-            0.1f
-        );
+        auto walledMaze = m_MazeBuilder.toWalledMaze();
+        uint32_t totalMazeWidth = innerMazeWidth + 2;
 
-        // Castle on hills
-        createObject(
-            assetManager,
-            CASTLE_ENTITY_NAME,
-            CASTLE_MODEL_NAME,
-            { -6.0f, -11.5f, -13.0f }
-        );
+        uint32_t currentMazeX = 0;
+        uint32_t currentMazeY = 0;
+
+        const std::string tilePrefix = "tile_";
+
+        uint32_t cellIndex = 0;
+        for (const auto & c : walledMaze.grid) {
+            glm::vec3 position = { 2.0f * currentMazeX, -1.0f, 2.0f * currentMazeY };
+            glm::vec3 rotation = { 0.0f, 0.0f, 0.0f };
+            constexpr float scale = 1.0f;
+
+            if (cellIndex == walledMaze.entrance) {
+                m_StartPosition = { position.x, position.y + 1.0f, position.z };
+
+                glm::vec3 entranceWallPosition = position;
+                entranceWallPosition.x -= 2.0f;
+                entranceWallPosition.y += 1.0f;
+                createObject(
+                    assetManager,
+                    tilePrefix + "entranceWall",
+                    CUBE_RED_MODEL_NAME,
+                    entranceWallPosition,
+                    rotation,
+                    scale
+                );
+            } else if (cellIndex == walledMaze.exit) {
+                m_ExitPosition = position;
+
+                glm::vec3 exitWallPosition = position;
+                exitWallPosition.x += 2.0f;
+                exitWallPosition.y += 1.0f;
+                createObject(
+                    assetManager,
+                    tilePrefix + "exitWall",
+                    CUBE_RED_MODEL_NAME,
+                    exitWallPosition,
+                    rotation,
+                    scale
+                );
+            }
+
+            if (c.type == MazeCellType::Wall) {
+                position.y += 1.0f;
+            }
+
+            std::string tileName = tilePrefix + std::to_string(currentMazeX + currentMazeY * totalMazeWidth);
+
+            createObject(
+                assetManager,
+                tileName,
+                c.type == MazeCellType::Corridor ? WALL_MODEL_NAME : CUBE_RED_MODEL_NAME,
+                position,
+                rotation,
+                scale
+            );
+
+            currentMazeX++;
+            if (currentMazeX == totalMazeWidth) {
+                currentMazeY++;
+                currentMazeX = 0;
+            }
+
+            cellIndex++;
+        }
 
         createLight(assetManager, { 0.0f, -1.0f, 10.0f });
     }
@@ -101,7 +146,7 @@ public:
         mesh.instance = AssetInstance(assetHandle);
         mesh.instance.load();
 
-        m_WorldObjects.emplace_back(name.c_str());
+        m_WorldObjects.emplace_back(std::move(name));
     }
 
     void createLight(
@@ -248,7 +293,7 @@ public:
         }
     }
 
-    const std::vector<const char *> & getObjectNames() const {
+    const std::vector<std::string> & getObjectNames() const {
         return m_WorldObjects;
     }
 
@@ -264,6 +309,18 @@ public:
     const Components::Light * getLight(const char * objectName) const {
         const auto entity = m_World.lookup(objectName);
         return entity.try_get<Components::Light>();
+    }
+
+    glm::vec3 getStartPosition() const {
+        return m_StartPosition;
+    }
+
+    glm::vec3 getExitPosition() const {
+        return m_ExitPosition;
+    }
+
+    const flecs::query<const Components::Transform, const Components::Mesh> & getObjectsQuery() const {
+        return m_ObjectsQuery;
     }
 
 private:
@@ -366,12 +423,12 @@ private:
         transformPtr->layout.scale = glm::vec4(t.scale, 0.0f);
     }
 
-    static SceneGraphTypes::Transform toSceneGraphTransform(const Components::Transform & transform) {
-        return { transform.position, transform.rotation, transform.scale };
-    }
-
 private:
     flecs::world m_World {};
+
+    flecs::query<const Components::Transform, const Components::Mesh> m_ObjectsQuery;
+
+    MazeBuilder m_MazeBuilder {};
 
     flecs::entity m_ObjectPrefab;
     flecs::entity m_LightPrefab;
@@ -384,9 +441,12 @@ private:
     flecs::system m_LightCubeSystem;
 
     // TODO change to vector of strings so we can add arbitrary objects at runtime
-    std::vector<const char *> m_WorldObjects {};
+    std::vector<std::string> m_WorldObjects {};
 
     std::vector<std::string> m_LightObjects {};
 
     uint32_t m_CreatedLights = 0;
+
+    glm::vec3 m_StartPosition {};
+    glm::vec3 m_ExitPosition {};
 };

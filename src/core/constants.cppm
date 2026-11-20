@@ -31,6 +31,9 @@ export const std::string TERRAIN_MATERIAL_NAME = "terrain";
 export const std::string TERRAIN_ENTITY_NAME = "terrain";
 
 export const std::string CUBE_MODEL_NAME = "cube.obj";
+export const std::string CUBE_RED_MODEL_NAME = "cube_red.obj";
+export const std::string WALL_MODEL_NAME = "wall.obj";
+export const std::string WALL_RED_MODEL_NAME = "wall_red.obj";
 
 // GLTF
 

@@ -116,6 +116,9 @@ private:
         if (key == GLFW_KEY_R && action == GLFW_PRESS) {
             app->m_ShadersSetToReload = true;
         }
+        if (key == GLFW_KEY_G && action == GLFW_PRESS) {
+            app->m_Camera.toggleGravity();
+        }
     }
 
     static void mouseButtonCallback(GLFWwindow * window, int button, int action, int mods) {
@@ -278,18 +281,18 @@ private:
             sprinting = true;
 
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-            camera.processKeyboard(CameraMovement::FORWARD, deltaTime, sprinting);
+            camera.processKeyboard(CameraMovement::FORWARD, deltaTime, sprinting, m_EntitySystem);
         if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-            camera.processKeyboard(CameraMovement::BACKWARD, deltaTime, sprinting);
+            camera.processKeyboard(CameraMovement::BACKWARD, deltaTime, sprinting, m_EntitySystem);
         if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-            camera.processKeyboard(CameraMovement::LEFT, deltaTime, sprinting);
+            camera.processKeyboard(CameraMovement::LEFT, deltaTime, sprinting, m_EntitySystem);
         if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-            camera.processKeyboard(CameraMovement::RIGHT, deltaTime, sprinting);
+            camera.processKeyboard(CameraMovement::RIGHT, deltaTime, sprinting, m_EntitySystem);
 
         if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
-            camera.processKeyboard(CameraMovement::UP, deltaTime, sprinting);
+            camera.processKeyboard(CameraMovement::UP, deltaTime, sprinting, m_EntitySystem);
         if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
-            camera.processKeyboard(CameraMovement::DOWN, deltaTime, sprinting);
+            camera.processKeyboard(CameraMovement::DOWN, deltaTime, sprinting, m_EntitySystem);
 
         if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
             glfwSetWindowShouldClose(window, true);
@@ -481,6 +484,7 @@ private:
         ImGui::Spacing();
         ImGui::Text("Controls: WASD to move, Space/Control to move up/down");
         ImGui::Text("Esc to show/hide mouse, Q to exit, R to reload shaders");
+        ImGui::Text("G to toggle gravity");
         ImGui::Spacing();
 
         if (ImGui::CollapsingHeader("Shader Controls", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -506,8 +510,6 @@ private:
 
             if (ImGui::BeginTable("ShaderControlCheckboxes", 2)) {
                 ImGui::TableNextColumn();
-                ImGui::Checkbox("Model spin enabled", &m_IsModelSpinEnabled);
-                ImGui::TableNextColumn();
                 ImGui::Checkbox("Particles enabled", &m_ParticlesEnabled);
                 ImGui::EndTable();
             }
@@ -519,10 +521,21 @@ private:
         if (ImGui::CollapsingHeader("Scene Controls", ImGuiTreeNodeFlags_DefaultOpen)) {
             static int selectedObject = -1;
             static int previouslySelectedObject = selectedObject;
-            ImGui::Combo("Object", &selectedObject, m_EntitySystem.getObjectNames().data(), m_EntitySystem.getObjectNames().size());
+
+            if (m_ObjectNamesOutOfDate) {
+                m_ObjectNames.clear();
+
+                const auto & objectStrings = m_EntitySystem.getObjectNames();
+                for (const auto & s : objectStrings) {
+                    m_ObjectNames.push_back(s.c_str());
+                }
+                m_ObjectNamesOutOfDate = false;
+            }
+
+            ImGui::Combo("Object", &selectedObject, m_ObjectNames.data(), m_ObjectNames.size());
             if (selectedObject != -1) {
                 // Need to display controls for changing object's transform
-                auto objectName = m_EntitySystem.getObjectNames().at(selectedObject);
+                auto objectName = m_ObjectNames.at(selectedObject);
                 auto transform = m_EntitySystem.getTransform(objectName);
                 assert(transform);
 
@@ -729,9 +742,8 @@ private:
         auto currentTime = std::chrono::high_resolution_clock::now();
         float time = std::chrono::duration<float>(currentTime - startTime).count();
 
-        if (m_IsModelSpinEnabled) {
-            m_EntitySystem.addRotation(VIKING_ROOM_ENTITY_NAME, 0, time * 90.0f, 0.0f);
-        }
+        // TODO add win condition calculation here maybe?
+
         startTime = currentTime;
     }
 
@@ -755,12 +767,12 @@ private:
         vk::PhysicalDeviceProperties physicalDeviceProperties = m_Instance.getPhysicalDeviceProperties();
 
         vk::SampleCountFlags counts = physicalDeviceProperties.limits.framebufferColorSampleCounts & physicalDeviceProperties.limits.framebufferDepthSampleCounts;
-        if (counts & vk::SampleCountFlagBits::e64) { return vk::SampleCountFlagBits::e64; };
-        if (counts & vk::SampleCountFlagBits::e32) { return vk::SampleCountFlagBits::e32; };
-        if (counts & vk::SampleCountFlagBits::e16) { return vk::SampleCountFlagBits::e16; };
-        if (counts & vk::SampleCountFlagBits::e8) { return vk::SampleCountFlagBits::e8; };
-        if (counts & vk::SampleCountFlagBits::e4) { return vk::SampleCountFlagBits::e4; };
-        if (counts & vk::SampleCountFlagBits::e2) { return vk::SampleCountFlagBits::e2; };
+        if (counts & vk::SampleCountFlagBits::e64) { return vk::SampleCountFlagBits::e64; }
+        if (counts & vk::SampleCountFlagBits::e32) { return vk::SampleCountFlagBits::e32; }
+        if (counts & vk::SampleCountFlagBits::e16) { return vk::SampleCountFlagBits::e16; }
+        if (counts & vk::SampleCountFlagBits::e8) { return vk::SampleCountFlagBits::e8; }
+        if (counts & vk::SampleCountFlagBits::e4) { return vk::SampleCountFlagBits::e4; }
+        if (counts & vk::SampleCountFlagBits::e2) { return vk::SampleCountFlagBits::e2; }
 
         return vk::SampleCountFlagBits::e1;
     }
@@ -933,6 +945,7 @@ private:
     void loadEntities() {
         m_EntitySystem.setupWorld(m_AssetManager);
         m_AssetManager.loadAll();
+        m_Camera.setPosition(m_EntitySystem.getStartPosition());
 
         m_DescriptorManager->writeToDescriptors();
     }
@@ -1210,11 +1223,13 @@ private:
     bool m_IsWindowFocused = true;
     bool m_ShouldCursorBeVisible = false;
     bool m_CanUiFocusBeToggled = false;     // Seems janky, should probably move to a more robust input state handling method later
-    bool m_IsModelSpinEnabled = true;
     bool m_DrawLightCubes = false;
 
     std::vector<const char *> m_LightNames {};
     bool m_LightNamesOutOfDate = true;
+
+    std::vector<const char *> m_ObjectNames {};
+    bool m_ObjectNamesOutOfDate = true;
 
     GLFWwindow * m_Window = nullptr;
 

@@ -60,9 +60,18 @@ export struct Plane {
     glm::vec3 normal = { 0.0f, 1.0f, 0.0f };
 };
 
-// TODO
 export struct BoundingBox {
-    void transform(const glm::mat4 & transformationMatrix) {
-        // TODO
+    glm::vec3 min;
+    glm::vec3 max;
+
+    // This comparison likely only works for AABBs, but that's all we have in this scenario
+    bool intersects(const BoundingBox & other) const {
+        if (min.x > other.max.x || other.min.x > max.x)
+            return false;
+        if (min.y > other.max.y || other.min.y > max.y)
+            return false;
+        if (min.z > other.max.z || other.min.z > max.z)
+            return false;
+        return true;
     }
 };

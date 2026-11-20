@@ -184,6 +184,8 @@ struct Scene {
     // Global scene transform - applies to each instance of asset
     Transform sceneTransform;
 
+    BoundingBox boundingBox;
+
     std::vector<uint32_t> rootIndices;
 
     // TODO should this really be a pointer? Or would making it a reference be better?
@@ -409,6 +411,10 @@ public:
         }
     }
 
+    BoundingBox & getBoundingBox() {
+        return m_Scene.boundingBox;
+    }
+
 private:
     glm::mat4x4 computeGlobalTransform(const SceneGraphTypes::Node * node) {
         assert(node);
@@ -461,6 +467,8 @@ public:
         m_TransformIndex = deviceMapper->addTransform();
         m_Transform.mapToDevice(deviceMapper, m_TransformIndex);
 
+        updateBoundingBox();
+
         m_IsLoaded = true;
     }
 
@@ -482,6 +490,8 @@ public:
 
         auto * deviceMapper = DeviceMapperLocator::locate();
         m_Transform.mapToDevice(deviceMapper, m_TransformIndex);
+
+        updateBoundingBox();
     }
 
     std::vector<SceneGraphTypes::DrawCallData> prepareDrawData() const {
@@ -490,10 +500,6 @@ public:
 
     SceneGraphTypes::Transform & getTransform() {
         return m_Transform;
-    }
-
-    void setTransform(const SceneGraphTypes::Transform & transform) {
-        m_Transform = transform;
     }
 
     Asset * getAsset() const {
@@ -507,9 +513,23 @@ public:
     bool isLoaded() const {
         return m_IsLoaded;
     }
+
+    const BoundingBox & getBoundingBox() const {
+        return m_BoundingBox;
+    }
+
+private:
+    void updateBoundingBox() {
+        m_BoundingBox = m_Asset->getBoundingBox();
+        const auto transformMatrix = m_Transform.asMatrix();
+        m_BoundingBox.min = transformMatrix * glm::vec4(m_BoundingBox.min, 1.0f);
+        m_BoundingBox.max = transformMatrix * glm::vec4(m_BoundingBox.max, 1.0f);
+    }
+
 private:
     Asset * m_Asset = nullptr;
     SceneGraphTypes::Transform m_Transform {};
+    BoundingBox m_BoundingBox {};
     device_index m_TransformIndex = INDEX_UNSET;
     bool m_IsLoaded = false;
 };

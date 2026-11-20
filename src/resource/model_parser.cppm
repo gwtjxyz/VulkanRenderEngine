@@ -150,6 +150,7 @@ public:
         for (auto & m : asset->meshes) {
             SceneGraphTypes::Mesh mesh {};
 
+            // TODO compute bounding box
             for (auto & mp : m.primitives) {
                 SceneGraphTypes::Primitive primitive {};
                 // vkCmdDrawIndexed requires indexCount, instanceCount, firstIndex, vertexOffset, firstInstance
@@ -320,6 +321,8 @@ public:
             std::println("Warning while loading OBJ model from path {}: {}; Proceeding with loading...", path.string(), warn);
         }
 
+        glm::vec3 minVertex {}, maxVertex {};
+        bool minUnset = true, maxUnset = true;
         for (const auto & shape : shapes) {
             for (const auto & index : shape.mesh.indices) {
                 SceneGraphTypes::Attribute attributeToStore {};
@@ -328,6 +331,31 @@ public:
                     attrib.vertices[3 * index.vertex_index + 1],
                     attrib.vertices[3 * index.vertex_index + 2]
                 };
+
+                // Basic bounding box calculation
+                if (minUnset) {
+                    minVertex = attributeToStore.position;
+                    minUnset = false;
+                } else {
+                    if (minVertex.x >= attributeToStore.position.x)
+                        minVertex.x = attributeToStore.position.x;
+                    if (minVertex.y >= attributeToStore.position.y)
+                        minVertex.y = attributeToStore.position.y;
+                    if (minVertex.z >= attributeToStore.position.z)
+                        minVertex.z = attributeToStore.position.z;
+                }
+
+                if (maxUnset) {
+                    maxVertex = attributeToStore.position;
+                    maxUnset = false;
+                } else {
+                    if (maxVertex.x <= attributeToStore.position.x)
+                        maxVertex.x = attributeToStore.position.x;
+                    if (maxVertex.y <= attributeToStore.position.y)
+                        maxVertex.y = attributeToStore.position.y;
+                    if (maxVertex.z <= attributeToStore.position.z)
+                        maxVertex.z = attributeToStore.position.z;
+                }
 
                 // OBJ assumes 0 = bottom of the image, but Vulkan works with 0 = top of the image, so we flip y coord
                 attributeToStore.texcoord0 = {
@@ -370,6 +398,8 @@ public:
         rootNode.meshIndex = 0;
         scene.nodes.emplace_back(rootNode);
         scene.rootIndices.emplace_back(0);
+        scene.boundingBox.min = minVertex;
+        scene.boundingBox.max = maxVertex;
 
         // Add one material
         // Assume an OBJ file only has up to a single material defined for simplicity

@@ -30,6 +30,9 @@
 # Shaders
 *.spv
 
+# Re-include .obj files
+!*.obj
+
 # Debug captures
 captures/
 

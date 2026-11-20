@@ -2,6 +2,8 @@ module;
 
 export module camera;
 
+import components;
+import entity_system;
 import glm;
 import render_types;
 
@@ -36,12 +38,15 @@ public:
     explicit Camera(
         glm::vec3 position = glm::vec3(0.0f, 0.0f, 0.0f), // World origin start
         glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f), // Y-axis as world up
-        float yaw = -90.0f, // Look along negative Z-axis (OpenGL convention)
+        float yaw = 0.0f,
         float pitch = 0.0f  // Level horizon,
     ) : m_Position(position), m_WorldUp(up) {
         m_Spin.pitch = pitch;
         m_Spin.yaw = yaw;
         m_Spin.roll = 0.0f; // TODO unused for now, maybe use later?
+
+        m_BoundingBox.min = glm::vec3(-0.2f, 0.0f, -0.2f);
+        m_BoundingBox.max = glm::vec3(0.2f, 0.5f, 0.2f);
 
         // initialize front, up, and right
         updateCameraVectors();
@@ -63,29 +68,74 @@ public:
         return glm::perspective(glm::radians(m_Zoom), m_AspectRatio, m_Near, m_Far);
     }
 
-    void processKeyboard(const CameraMovement direction, const float deltaTime, bool sprinting) {
+    void processKeyboard(const CameraMovement direction, const float deltaTime, bool sprinting, EntitySystem & entitySystem) {
         float velocity = m_MovementSpeed * deltaTime;
         if (sprinting) velocity *= 2;
 
-        switch (direction) {
-            case CameraMovement::FORWARD:
-                m_Position += m_Front * velocity;
-                break;
-            case CameraMovement::BACKWARD:
-                m_Position -= m_Front * velocity;
-                break;
-            case CameraMovement::LEFT:
-                m_Position -= m_Right * velocity;
-                break;
-            case CameraMovement::RIGHT:
-                m_Position += m_Right * velocity;
-                break;
-            case CameraMovement::UP:
-                m_Position += m_WorldUp * velocity;
-                break;
-            case CameraMovement::DOWN:
-                m_Position -= m_WorldUp * velocity;
-                break;
+        glm::vec3 newPosition = m_Position;
+
+        if (m_Gravity) {
+            switch (direction) {
+                case CameraMovement::FORWARD:
+                    newPosition += m_LockedFront * velocity;
+                    break;
+                case CameraMovement::BACKWARD:
+                    newPosition -= m_LockedFront * velocity;
+                    break;
+                case CameraMovement::LEFT:
+                    newPosition -= m_LockedRight * velocity;
+                    break;
+                case CameraMovement::RIGHT:
+                    newPosition += m_LockedRight * velocity;
+                    break;
+                default:
+                    break;
+            }
+        } else {
+            switch (direction) {
+                case CameraMovement::FORWARD:
+                    newPosition += m_Front * velocity;
+                    break;
+                case CameraMovement::BACKWARD:
+                    newPosition -= m_Front * velocity;
+                    break;
+                case CameraMovement::LEFT:
+                    newPosition -= m_Right * velocity;
+                    break;
+                case CameraMovement::RIGHT:
+                    newPosition += m_Right * velocity;
+                    break;
+                case CameraMovement::UP:
+                    newPosition += m_WorldUp * velocity;
+                    break;
+                case CameraMovement::DOWN:
+                    newPosition -= m_WorldUp * velocity;
+                    break;
+            }
+        }
+
+        // Disable collision for flying around because we don't handle getting stuck in objects yet
+        if (!m_Gravity) {
+            m_Position = newPosition;
+            return;
+        }
+
+        BoundingBox newCameraBB {};
+        newCameraBB.min = m_BoundingBox.min + newPosition;
+        newCameraBB.max = m_BoundingBox.max + newPosition;
+
+        bool collisionFound = false;
+        auto query = entitySystem.getObjectsQuery();
+        query.each([&](const Components::Transform & t, const Components::Mesh & m) {
+            BoundingBox objectBB = m.instance.getBoundingBox();
+
+            if (newCameraBB.intersects(objectBB)) {
+                collisionFound = true;
+            }
+        });
+
+        if (!collisionFound) {
+            m_Position = newPosition;
         }
     }
 
@@ -143,6 +193,17 @@ public:
     void updateAspectRatio(const float aspectRatio) {
         m_AspectRatio = aspectRatio;
     }
+
+    void setPosition(const glm::vec3 position) {
+        m_Position = position;
+    }
+
+    void toggleGravity() {
+        m_Gravity = !m_Gravity;
+        if (m_Gravity && m_Position.y > 0.0f) {
+            m_Position.y = 0.0f;
+        }
+    }
 private:
     // TODO use this somewhere else probably, or for interpolation
     // don't really need this for camera but I'll keep it as reference
@@ -169,27 +230,19 @@ private:
     }
 
     void updateCameraVectors() {
-        // const glm::quat rotationQuat = quatFromAngles();
-#if 0
-        // OpenGL world coordinate system => negative-z is forward
-        glm::vec3 newFront {0.0f, 0.0f, -1.0f};
-        // glm::quat rotation = quatFromAngles();
-        // why do we need to invert Y??
-        auto rotation = glm::quat(glm::vec3(
-            glm::radians(m_Spin.pitch),
-            -glm::radians(m_Spin.yaw),
-            glm::radians(m_Spin.roll)
-        ));
-        m_Front = rotation * newFront;
-#else
-        glm::vec3 newFront {};
-        newFront.x = glm::cos(glm::radians(m_Spin.yaw)) * glm::cos(glm::radians(m_Spin.pitch));
-        newFront.y = glm::sin(glm::radians(m_Spin.pitch));
-        newFront.z = glm::sin(glm::radians(m_Spin.yaw)) * glm::cos(glm::radians(m_Spin.pitch));
-        m_Front = glm::normalize(newFront);
-#endif
+        m_Front.x = glm::cos(glm::radians(m_Spin.yaw)) * glm::cos(glm::radians(m_Spin.pitch));
+        m_Front.y = glm::sin(glm::radians(m_Spin.pitch));
+        m_Front.z = glm::sin(glm::radians(m_Spin.yaw)) * glm::cos(glm::radians(m_Spin.pitch));
+        m_Front = glm::normalize(m_Front);
+
+        m_LockedFront.x = glm::cos(glm::radians(m_Spin.yaw)) * glm::cos(glm::radians(m_Spin.pitch));
+        m_LockedFront.y = 0.0f;
+        m_LockedFront.z = glm::sin(glm::radians(m_Spin.yaw)) * glm::cos(glm::radians(m_Spin.pitch));
+        m_LockedFront = glm::normalize(m_LockedFront);
 
         m_Right = glm::normalize(glm::cross(m_Front, m_WorldUp));
+        m_LockedRight = glm::normalize(glm::cross(m_LockedFront, m_WorldUp));
+
         m_Up = glm::normalize(glm::cross(m_Right, m_Front));
     }
 
@@ -200,6 +253,9 @@ private:
     glm::vec3 m_Right{}; // Camera's local right direction (perpendicular to front and up)
     glm::vec3 m_WorldUp{}; // Global up vector reference (typically Y-axis)
 
+    glm::vec3 m_LockedFront {};
+    glm::vec3 m_LockedRight {};
+
     // in degrees
     struct Spin {
         float pitch; // X-axis
@@ -209,10 +265,14 @@ private:
 
     Spin m_Spin {};
 
+    BoundingBox m_BoundingBox;
+
     float m_MovementSpeed{};
     float m_MouseSensitivity{};
     float m_Zoom{};                 // Vertical FOV
     float m_AspectRatio{};
     float m_Near {};
     float m_Far {};
+
+    bool m_Gravity = true;
 };
