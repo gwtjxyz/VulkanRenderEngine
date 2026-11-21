@@ -83,20 +83,20 @@ export struct Transform {
     }
 
     void mapToDevice(DeviceMapper * deviceMapper, const uint32_t index) const {
-        auto * deviceTransform = deviceMapper->getTransform(index);
+        auto & deviceTransform = deviceMapper->getTransform(index);
 
-        deviceTransform->layout.position.x = translation.x;
-        deviceTransform->layout.position.y = translation.y;
-        deviceTransform->layout.position.z = translation.z;
+        deviceTransform.position.x = translation.x;
+        deviceTransform.position.y = translation.y;
+        deviceTransform.position.z = translation.z;
 
-        deviceTransform->layout.rotation.x = rotation.x;
-        deviceTransform->layout.rotation.y = rotation.y;
-        deviceTransform->layout.rotation.z = rotation.z;
-        deviceTransform->layout.rotation.w = rotation.w;
+        deviceTransform.rotation.x = rotation.x;
+        deviceTransform.rotation.y = rotation.y;
+        deviceTransform.rotation.z = rotation.z;
+        deviceTransform.rotation.w = rotation.w;
 
-        deviceTransform->layout.scale.x = scale.x;
-        deviceTransform->layout.scale.y = scale.y;
-        deviceTransform->layout.scale.z = scale.z;
+        deviceTransform.scale.x = scale.x;
+        deviceTransform.scale.y = scale.y;
+        deviceTransform.scale.z = scale.z;
     }
 };
 
@@ -246,14 +246,14 @@ public:
         for (auto & mat : m_Scene.materials) {
             device_index materialDeviceIndex = m_DeviceMapper->addMaterial(mat.color, INDEX_UNSET);
             m_MaterialMap.insert_or_assign(materialGraphIndex, materialDeviceIndex);
-            m_DeviceMapper->getMaterial(materialDeviceIndex)->layout.materialTint = mat.color;
+            m_DeviceMapper->getMaterial(materialDeviceIndex).materialTint = mat.color;
 
             // TODO add support for reusing textures across assets
             device_index textureIndex = INDEX_UNSET;
             // TODO: for now we assume all textures are sampled the same way, maybe change later?
             if (!mat.texturePath.empty()) {
                 textureIndex = textureManager->load(mat.texturePath, materialDeviceIndex);
-                m_DeviceMapper->getMaterial(materialDeviceIndex)->layout.textureIndex = textureIndex;
+                m_DeviceMapper->getMaterial(materialDeviceIndex).textureIndex = textureIndex;
             }
 
             materialGraphIndex++;
@@ -276,7 +276,7 @@ public:
                 // multiple primitives = need a separate draw for each of them
                 device_index drawDeviceIndex = m_DeviceMapper->addDraw();
                 m_DrawMap.insert_or_assign(mpIndex, drawDeviceIndex);
-                m_DeviceMapper->getDraw(drawDeviceIndex)->layout = {
+                m_DeviceMapper->getDraw(drawDeviceIndex) = {
                     transformDeviceIndex, m_MaterialMap.at(p.materialIndex), true
                 };
 

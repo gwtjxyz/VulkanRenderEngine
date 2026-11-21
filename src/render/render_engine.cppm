@@ -255,8 +255,6 @@ private:
                 timeSinceLastFpsMeasurement = timeAtFrameEnd;
             }
         }
-
-        m_Instance.getDevice().waitIdle();
     }
 
     static bool isImguiCapturingKeyboard() {
@@ -311,7 +309,6 @@ private:
 
         cleanupDepthResources();
         cleanupColorResources();
-        m_DeviceMapper->freeResources();
 
         for (auto & computeDataBuffer : m_ComputeDataBuffers) {
             m_VulkanResourceService->freeResources(computeDataBuffer.buffer, computeDataBuffer.bufferMemory);
@@ -321,6 +318,8 @@ private:
         m_TextureManager->destroyAll();
         m_AssetManager.destroyAll();
         m_PipelineManager->destroyAll();
+
+        m_DeviceMapper->freeResources();
 
         ImGui_ImplVulkan_Shutdown();
         ImGui_ImplGlfw_Shutdown();
@@ -360,12 +359,9 @@ private:
 
         // Compute
         {
-            // If particles are toggled off, don't compute or render anything
-            // Still need to "submit" work after in order to signal semaphores, otherwise
-            // the following stages would wait forever and freeze the program
-            if (m_ParticlesEnabled) {
-                recordComputeCommandBuffer();
-            }
+            // Need to record and submit work even if we're not actually displaying anything
+            // to signal timeline semaphores, otherwise subsequent stages will wait forever
+            recordComputeCommandBuffer();
             // Submit compute work
             vk::TimelineSemaphoreSubmitInfo computeTimelineInfo = {
                 .waitSemaphoreValueCount = 1,
@@ -1122,8 +1118,11 @@ private:
         m_PipelineManager->prepareComputeConstants(m_ComputePushConstants.addressThisFrame, m_ComputePushConstants.addressLastFrame, m_DeltaTime);
 
         m_PipelineManager->bindComputePushConstants();
-        // Correlates to [numthreads(x, y, z)] inside the shader
-        commandBuffer.dispatch(PARTICLE_COUNT / 256, 1, 1);
+
+        if (m_ParticlesEnabled) {
+            // Correlates to [numthreads(x, y, z)] inside the shader
+            commandBuffer.dispatch(PARTICLE_COUNT / 256, 1, 1);
+        }
         commandBuffer.end();
     }
 
@@ -1218,7 +1217,7 @@ private:
 
     // Dynamic shader data
     LightMode m_LightMode = LightMode::Phong;
-    bool m_ParticlesEnabled = true;
+    bool m_ParticlesEnabled = false;
 
     bool m_IsWindowFocused = true;
     bool m_ShouldCursorBeVisible = false;

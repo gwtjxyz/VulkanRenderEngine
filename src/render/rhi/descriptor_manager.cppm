@@ -182,8 +182,8 @@ private:
     void initializeSampler() {
         vk::PhysicalDeviceProperties properties = m_Instance->getPhysicalDeviceProperties();
         vk::SamplerCreateInfo samplerInfo = {
-            .magFilter = vk::Filter::eLinear,
-            .minFilter = vk::Filter::eLinear,
+            .magFilter = vk::Filter::eNearest,
+            .minFilter = vk::Filter::eNearest,
             .mipmapMode = vk::SamplerMipmapMode::eLinear,
             .addressModeU = vk::SamplerAddressMode::eRepeat,
             .addressModeV = vk::SamplerAddressMode::eRepeat,

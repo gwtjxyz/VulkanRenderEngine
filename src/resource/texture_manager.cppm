@@ -81,7 +81,7 @@ public:
             VulkanResourceServiceLocator::locate()->freeResources(vulkanImageData.image, vulkanImageData.imageMemory, vulkanImageData.imageView);
         }
 
-        DeviceMapperLocator::locate()->getMaterial(materialIndex)->layout.textureIndex = textureIndex;
+        DeviceMapperLocator::locate()->getMaterial(materialIndex).textureIndex = textureIndex;
         return textureIndex;
     }
 
@@ -89,7 +89,7 @@ public:
         if (materialIndex == INDEX_UNSET) {
             return;
         }
-        const auto textureIndex = DeviceMapperLocator::locate()->getMaterial(materialIndex)->layout.textureIndex;
+        const auto textureIndex = DeviceMapperLocator::locate()->getMaterial(materialIndex).textureIndex;
         if (textureIndex == INDEX_UNSET) {
             return;
         }
@@ -100,7 +100,7 @@ public:
         }
 
         VulkanResourceServiceLocator::locate()->freeResources(texture.image, texture.deviceMemory, texture.imageView);
-        DeviceMapperLocator::locate()->getMaterial(materialIndex)->layout.textureIndex = INDEX_UNSET;
+        DeviceMapperLocator::locate()->getMaterial(materialIndex).textureIndex = INDEX_UNSET;
 
         // Make sure to fill the empty slot with the placeholder texture if we're not shutting down
         // so that Vulkan doesn't freak out, since we're not using null descriptors
@@ -130,6 +130,6 @@ public:
     }
 private:
     const uint32_t m_PlaceholderIndex = 0;
-    const uint32_t m_InitialTextureCount = 100;
+    const uint32_t m_InitialTextureCount = 20;
     std::vector<Texture> m_Textures {};
 };

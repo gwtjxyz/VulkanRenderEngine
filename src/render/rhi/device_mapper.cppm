@@ -30,28 +30,7 @@ import core_types;
 import render_types;
 import vulkan_resource_service;
 
-// Structure to keep track of data mappings on the GPU
-// Note: doesn't support downsizing for now, really - need to be careful about
-// deleting and reusing resources inside these buffers
-struct MappedBufferGroup {
-    std::vector<VulkanBDABufferData> shaderBuffers;
-
-    uint32_t objectCount;                       // How many objects are currently used/allocated
-    uint32_t maxObjectCount;                    // Maximum buffer capacity - if we ever exceed it, need to resize
-
-    std::vector<bool> occupied;                 // true if object at that index exists, false otherwise
-
-    explicit MappedBufferGroup() = default;
-
-    explicit MappedBufferGroup(const std::vector<VulkanBDABufferData> & shaderBufferData, const uint32_t maxObjectCount) :
-        shaderBuffers(shaderBufferData),
-        objectCount(0),
-        maxObjectCount(maxObjectCount) {
-        occupied.resize(maxObjectCount, false);
-    }
-};
-
-export enum class MappedBufferType {
+export enum class BufferType {
     Transform,
     Material,
     Draw,
@@ -60,48 +39,183 @@ export enum class MappedBufferType {
 };
 
 struct TransformLayout {
-    glm::vec4 position;
-    glm::vec4 rotation;
-    glm::vec4 scale;
+    glm::vec4 position {};
+    glm::vec4 rotation {};
+    glm::vec4 scale {};
 };
 
 struct MaterialLayout {
     glm::vec4 materialTint { 0.0f };
     uint32_t textureIndex = INDEX_UNSET;            // texture is unset => use color only
-    glm::vec3 unused;                               // padding
+    glm::vec3 unused {};                            // padding
 };
 
 struct DrawLayout {
     uint32_t transformIndex = INDEX_UNSET;
     uint32_t materialIndex = INDEX_UNSET;
-    hlsl_bool enabled = false;
+    hlsl_bool enabled = false;                      // booleans in HLSL are 4 bytes
 };
 
 struct LightLayout {
     uint32_t transformIndex = INDEX_UNSET;
     glm::vec3 color { 1.0f };
     float intensity = 1.0f;
-    uint32_t enabled = false;
-    // TODO add radius etc
+    hlsl_bool enabled = false;
 };
-
-// Layout = what we send to the GPU
-// TODO simplify - no need for templating here
-template <typename Layout>
-struct DataBuffer {
-    Layout layout {};
-};
-
-using TransformDataBuffer = DataBuffer<TransformLayout>;
-
-using MaterialDataBuffer = DataBuffer<MaterialLayout>;
-
-using DrawDataBuffer = DataBuffer<DrawLayout>;
-
-using LightDataBuffer = DataBuffer<LightLayout>;
 
 struct AddressMappings {
-    vk::DeviceAddress drawAddress, lightAddress, transformAddress, materialAddress;
+    vk::DeviceAddress transformAddress, materialAddress, drawAddress, lightAddress;
+};
+
+struct CopyCommand {
+    BufferType type;
+    uint32_t start;
+    uint32_t end;
+    uint32_t frameIndex;
+};
+
+template <typename T>
+struct CPUBuffer {
+    std::vector<T> data {};
+    std::vector<bool> dirty {};
+};
+
+// Structure to keep track of data mappings on the GPU
+// Note: doesn't support downsizing for now - need to be careful about
+// deleting and reusing resources inside these buffers
+struct GPUBufferGroup {
+    std::vector<VulkanBDABufferData> bdaBuffers {}; // One per frame in flight
+
+    uint32_t objectCount = 0;                        // How many objects are currently used/allocated
+    uint32_t maxObjectCount = 0;                     // Maximum buffer capacity - if we ever exceed it, need to resize
+
+    std::vector<bool> occupied {};                   // true if object at that index exists, false otherwise
+};
+
+template <typename T>
+class DeviceBuffer {
+public:
+    DeviceBuffer() = default;
+
+    void initialize(const uint32_t initialObjectCount, const uint32_t maxFramesInFlight) {
+        m_CpuBuffer.data.resize(initialObjectCount, {});
+        m_CpuBuffer.dirty.resize(initialObjectCount, true);
+
+        VulkanResourceService * vulkanResourceService = VulkanResourceServiceLocator::locate();
+
+        for (auto i = 0; i < maxFramesInFlight; ++i) {
+            auto bdaBuffer = vulkanResourceService->createBDABuffer(initialObjectCount * sizeof(T));
+            m_GpuBufferGroup.bdaBuffers.emplace_back(bdaBuffer);
+        }
+
+        m_GpuBufferGroup.maxObjectCount = initialObjectCount;
+        m_GpuBufferGroup.occupied.resize(initialObjectCount, false);
+    }
+
+    void destroy() {
+        VulkanResourceService * vulkanResourceService = VulkanResourceServiceLocator::locate();
+
+        for (auto & b : m_GpuBufferGroup.bdaBuffers) {
+            vulkanResourceService->freeResourcesAndUnmapMemory(b.buffer, b.bufferMemory);
+        }
+        m_GpuBufferGroup.bdaBuffers.clear();
+        m_GpuBufferGroup.objectCount = 0;
+        m_GpuBufferGroup.maxObjectCount = 0;
+        m_GpuBufferGroup.occupied.clear();
+
+        m_CpuBuffer.data.clear();
+        m_CpuBuffer.dirty.clear();
+    }
+
+    uint32_t add() {
+        uint32_t firstFreeIndex = 0;
+
+        for (const auto occupiedAtIndex : m_GpuBufferGroup.occupied) {
+            if (!occupiedAtIndex) {
+                break;
+            }
+            firstFreeIndex++;
+        }
+
+        m_GpuBufferGroup.objectCount++;
+        if (m_GpuBufferGroup.objectCount >= m_GpuBufferGroup.maxObjectCount) {
+            const uint32_t newMaxObjectCount = m_GpuBufferGroup.maxObjectCount + 100;
+            expand(newMaxObjectCount);
+        }
+
+        m_GpuBufferGroup.occupied.at(firstFreeIndex) = true;
+        m_CpuBuffer.dirty.at(firstFreeIndex) = true;            // TODO not sure if need to mark dirty here
+
+        return firstFreeIndex;
+    }
+
+    // We always mark dirty because we assume that the caller will only request layout data in order to modify it
+    T & getAndMarkDirty(const uint32_t index) {
+        m_CpuBuffer.dirty.at(index) = true;
+        return m_CpuBuffer.data.at(index);
+    }
+
+    void remove(const uint32_t index) {
+        m_GpuBufferGroup.occupied.at(index) = false;
+        m_CpuBuffer.dirty.at(index) = true;
+    }
+
+    vk::DeviceAddress getBufferDeviceAddressForFrame(const uint32_t frameIndex) const {
+        return m_GpuBufferGroup.bdaBuffers.at(frameIndex).bufferDeviceAddress;
+    }
+
+    uint32_t getObjectCount() const {
+        return m_CpuBuffer.data.size();
+    }
+
+    std::vector<bool> & getDirtyStates() {
+        return m_CpuBuffer.dirty;
+    }
+
+    T * getCpuSideData() {
+        return m_CpuBuffer.data.data();
+    }
+
+    void * getMappedMemory(const uint32_t frameIndex) const {
+        return m_GpuBufferGroup.bdaBuffers.at(frameIndex).mappedMemory;
+    }
+
+    static size_t getLayoutSize() {
+        return sizeof(T);
+    }
+
+private:
+    // Have to do this while Vulkan device is idle, otherwise bad things can happen
+    void expand(const uint32_t newMaxObjectCount) {
+        assert(newMaxObjectCount > m_GpuBufferGroup.maxObjectCount && "Must be expanding to a size bigger than the current size.");
+
+        auto * vulkanResourceService = VulkanResourceServiceLocator::locate();
+        const uint32_t maxFramesInFlight = m_GpuBufferGroup.bdaBuffers.size();
+
+        m_CpuBuffer.data.resize(newMaxObjectCount, {});
+        m_CpuBuffer.dirty.resize(newMaxObjectCount, true);
+
+        std::vector<VulkanBDABufferData> newBdaBuffers {};
+        for (auto i = 0; i < maxFramesInFlight; ++i) {
+            auto newBdaBuffer = vulkanResourceService->createBDABuffer(newMaxObjectCount * sizeof(T));
+            vulkanResourceService->copyBuffer(
+                m_GpuBufferGroup.bdaBuffers[i].buffer,
+                newBdaBuffer.buffer,
+                m_GpuBufferGroup.maxObjectCount * sizeof(T)
+            );
+
+            vulkanResourceService->freeResourcesAndUnmapMemory(m_GpuBufferGroup.bdaBuffers[i].buffer, m_GpuBufferGroup.bdaBuffers[i].bufferMemory);
+            newBdaBuffers.emplace_back(newBdaBuffer);
+        }
+
+        m_GpuBufferGroup.bdaBuffers = std::move(newBdaBuffers);
+        m_GpuBufferGroup.occupied.resize(newMaxObjectCount, false);
+        m_GpuBufferGroup.maxObjectCount = newMaxObjectCount;
+    }
+
+private:
+    CPUBuffer<T> m_CpuBuffer {};
+    GPUBufferGroup m_GpuBufferGroup {};
 };
 
 export class DeviceMapper;
@@ -119,249 +233,209 @@ public:
         const auto * resourceService = VulkanResourceServiceLocator::locate();
         assert(resourceService != nullptr);
 
-        m_MappedBuffers.clear();
-        allocateBuffer(initialObjectCount, resourceService, MappedBufferType::Transform);
-        allocateBuffer(initialObjectCount, resourceService, MappedBufferType::Material);
-        allocateBuffer(initialObjectCount, resourceService, MappedBufferType::Draw);
-        allocateBuffer(initialObjectCount, resourceService, MappedBufferType::Light);
-
-        m_Transforms.resize(initialObjectCount, {});
-        m_Materials.resize(initialObjectCount, {});
-        m_Draws.resize(initialObjectCount, {});
-        m_Lights.resize(initialObjectCount, {});
+        m_Transforms.initialize(initialObjectCount, m_MaxFramesInFlight);
+        m_Materials.initialize(initialObjectCount, m_MaxFramesInFlight);
+        m_Draws.initialize(initialObjectCount, m_MaxFramesInFlight);
+        m_Lights.initialize(initialObjectCount, m_MaxFramesInFlight);
     }
 
     void freeResources() {
-        for (auto & bufferPair : m_MappedBuffers) {
-            for (auto i = 0; i < m_MaxFramesInFlight; ++i) {
-                auto & bufferToFree = bufferPair.second.shaderBuffers[i];
-                VulkanResourceServiceLocator::locate()->freeResourcesAndUnmapMemory(bufferToFree.buffer, bufferToFree.bufferMemory);
-            }
-        }
+        m_Transforms.destroy();
+        m_Materials.destroy();
+        m_Draws.destroy();
+        m_Lights.destroy();
+    }
+
+    void prepareCopyCommands() {
+        prepareCopyCommandsForBuffer(BufferType::Transform);
+        prepareCopyCommandsForBuffer(BufferType::Material);
+        prepareCopyCommandsForBuffer(BufferType::Draw);
+        prepareCopyCommandsForBuffer(BufferType::Light);
     }
 
     void uploadToGPU(const uint32_t frameIndex) {
-        std::memcpy(
-            m_MappedBuffers[MappedBufferType::Transform].shaderBuffers[frameIndex].mappedMemory,
-            m_Transforms.data(),
-            m_Transforms.size() * sizeof(TransformLayout)
-        );
-        std::memcpy(
-            m_MappedBuffers[MappedBufferType::Material].shaderBuffers[frameIndex].mappedMemory,
-            m_Materials.data(),
-            m_Materials.size() * sizeof(MaterialLayout)
-        );
-        std::memcpy(
-            m_MappedBuffers[MappedBufferType::Draw].shaderBuffers[frameIndex].mappedMemory,
-            m_Draws.data(),
-            m_Draws.size() * sizeof(DrawLayout)
-        );
-        std::memcpy(
-            m_MappedBuffers[MappedBufferType::Light].shaderBuffers[frameIndex].mappedMemory,
-            m_Lights.data(),
-            m_Lights.size() * sizeof(LightLayout)
-        );
+        for (auto it = m_CopyCommands.begin(); it != m_CopyCommands.end();) {
+            uint32_t objectCount = it->end - it->start;
+            void * dataSource;
+            void * dataDestination;
+            size_t layoutSize;
+
+            if (it->frameIndex != frameIndex) {
+                ++it;
+                continue;
+            }
+
+            switch (it->type) {
+                case BufferType::Transform:
+                    dataSource = m_Transforms.getCpuSideData();
+                    dataDestination = m_Transforms.getMappedMemory(frameIndex);
+                    layoutSize = m_Transforms.getLayoutSize();
+                    break;
+                case BufferType::Material:
+                    dataSource = m_Materials.getCpuSideData();
+                    dataDestination = m_Materials.getMappedMemory(frameIndex);
+                    layoutSize = m_Materials.getLayoutSize();
+                    break;
+                case BufferType::Draw:
+                    dataSource = m_Draws.getCpuSideData();
+                    dataDestination = m_Draws.getMappedMemory(frameIndex);
+                    layoutSize = m_Draws.getLayoutSize();
+                    break;
+                case BufferType::Light:
+                    dataSource = m_Lights.getCpuSideData();
+                    dataDestination = m_Lights.getMappedMemory(frameIndex);
+                    layoutSize = m_Lights.getLayoutSize();
+                    break;
+                default:
+                    throw std::runtime_error("Unknown buffer layout.");
+            }
+
+            dataSource = static_cast<char *>(dataSource) + layoutSize * it->start;
+            dataDestination = static_cast<char *>(dataDestination) + layoutSize * it->start;
+
+            std::memcpy(dataDestination, dataSource, layoutSize * objectCount);
+
+            it = m_CopyCommands.erase(it);
+        }
     }
 
-    AddressMappings getAddressMappingsForFrame(const uint32_t frameIndex) {
+    AddressMappings getAddressMappingsForFrame(const uint32_t frameIndex) const {
         AddressMappings result;
-        result.drawAddress = m_MappedBuffers.at(MappedBufferType::Draw).shaderBuffers[frameIndex].bufferDeviceAddress;
-        result.lightAddress = m_MappedBuffers.at(MappedBufferType::Light).shaderBuffers[frameIndex].bufferDeviceAddress;
-        result.materialAddress = m_MappedBuffers.at(MappedBufferType::Material).shaderBuffers[frameIndex].bufferDeviceAddress;
-        result.transformAddress = m_MappedBuffers.at(MappedBufferType::Transform).shaderBuffers[frameIndex].bufferDeviceAddress;
+        result.transformAddress = m_Transforms.getBufferDeviceAddressForFrame(frameIndex);
+        result.materialAddress = m_Materials.getBufferDeviceAddressForFrame(frameIndex);
+        result.drawAddress = m_Draws.getBufferDeviceAddressForFrame(frameIndex);
+        result.lightAddress = m_Lights.getBufferDeviceAddressForFrame(frameIndex);
 
         return result;
     }
 
     uint32_t addTransform() {
-        const uint32_t transformIndex = addToMappedBuffer(MappedBufferType::Transform);
-
-        m_Transforms.at(transformIndex) = TransformDataBuffer();
-
-        return transformIndex;
+        return m_Transforms.add();
     }
 
-    TransformDataBuffer * getTransform(const uint32_t transformIndex) {
-        return &m_Transforms.at(transformIndex);
+    TransformLayout & getTransform(const uint32_t transformIndex) {
+        return m_Transforms.getAndMarkDirty(transformIndex);
     }
 
     void removeTransform(const uint32_t transformIndex) {
-        MappedBufferGroup & transformBuffer = m_MappedBuffers[MappedBufferType::Transform];
-
-        transformBuffer.occupied.at(transformIndex) = false;
-        transformBuffer.objectCount--;
+        m_Transforms.remove(transformIndex);
     }
 
     uint32_t addMaterial(const glm::vec4 & materialTint, const uint32_t textureIndex) {
-        const uint32_t materialIndex = addToMappedBuffer(MappedBufferType::Material);
-
-        m_Materials.at(materialIndex) = { materialTint, textureIndex };
+        const uint32_t materialIndex = m_Materials.add();
+        MaterialLayout & material = m_Materials.getAndMarkDirty(materialIndex);
+        material.materialTint = materialTint;
+        material.textureIndex = textureIndex;
 
         return materialIndex;
     }
 
-    MaterialDataBuffer * getMaterial(const uint32_t materialIndex) {
-        return &m_Materials.at(materialIndex);
+    MaterialLayout & getMaterial(const uint32_t materialIndex) {
+        return m_Materials.getAndMarkDirty(materialIndex);
     }
 
     void removeMaterial(const uint32_t materialIndex) {
-        MappedBufferGroup & materialBuffer = m_MappedBuffers[MappedBufferType::Material];
-
-        materialBuffer.occupied.at(materialIndex) = false;
-        materialBuffer.objectCount--;
+        m_Materials.remove(materialIndex);
     }
 
     uint32_t addDraw() {
-        const uint32_t drawIndex = addToMappedBuffer(MappedBufferType::Draw);
-
-        m_Draws.at(drawIndex) = { INDEX_UNSET, INDEX_UNSET, true };
+        const uint32_t drawIndex = m_Draws.add();
+        DrawLayout & draw = m_Draws.getAndMarkDirty(drawIndex);
+        draw.enabled = true;
 
         return drawIndex;
     }
 
-    DrawDataBuffer * getDraw(const uint32_t drawIndex) {
-        return &m_Draws.at(drawIndex);
+    DrawLayout & getDraw(const uint32_t drawIndex) {
+        return m_Draws.getAndMarkDirty(drawIndex);
     }
 
     void removeDraw(const uint32_t drawIndex) {
-        MappedBufferGroup & drawBuffer = m_MappedBuffers[MappedBufferType::Draw];
-
-        drawBuffer.occupied.at(drawIndex) = false;
-        drawBuffer.objectCount--;
+        DrawLayout & draw = m_Draws.getAndMarkDirty(drawIndex);
+        draw.enabled = false;
+        m_Draws.remove(drawIndex);
     }
 
     uint32_t addLight() {
-        const uint32_t lightIndex = addToMappedBuffer(MappedBufferType::Light);
-
-        m_Lights.at(lightIndex) = LightDataBuffer();
-
-        return lightIndex;
+        return m_Lights.add();
     }
 
-    LightDataBuffer * getLight(const uint32_t lightIndex) {
-        return &m_Lights.at(lightIndex);
+    LightLayout & getLight(const uint32_t lightIndex) {
+        return m_Lights.getAndMarkDirty(lightIndex);
     }
 
     void removeLight(const uint32_t lightIndex) {
-        MappedBufferGroup & lightBuffer = m_MappedBuffers[MappedBufferType::Light];
+        LightLayout & light = m_Lights.getAndMarkDirty(lightIndex);
 
-        auto & light = m_Lights.at(lightIndex);
-        light.layout.enabled = false;
-        light.layout.transformIndex = INDEX_UNSET;
+        light.enabled = false;
+        light.transformIndex = INDEX_UNSET;
 
-        lightBuffer.occupied.at(lightIndex) = false;
-        lightBuffer.objectCount--;
+        m_Lights.remove(lightIndex);
     }
 
     uint32_t getLightCount() const {
-        return m_Lights.size();
+        return m_Lights.getObjectCount();
     }
 
 private:
-    static uint32_t getLayoutSize(MappedBufferType type) {
+    void prepareCopyCommandsForBuffer(const BufferType type) {
+        std::vector<bool> * dirtyFlags;
         switch (type) {
-            case MappedBufferType::Transform:
-                return sizeof(TransformLayout);
-            case MappedBufferType::Material:
-                return sizeof(MaterialLayout);
-            case MappedBufferType::Draw:
-                return sizeof(DrawLayout);
-            case MappedBufferType::Light:
-                return sizeof(LightLayout);
+            case BufferType::Transform:
+                dirtyFlags = &m_Transforms.getDirtyStates();
+                break;
+            case BufferType::Material:
+                dirtyFlags = &m_Materials.getDirtyStates();
+                break;
+            case BufferType::Draw:
+                dirtyFlags = &m_Draws.getDirtyStates();
+                break;
+            case BufferType::Light:
+                dirtyFlags = &m_Lights.getDirtyStates();
+                break;
             default:
                 throw std::runtime_error("Unknown buffer layout.");
         }
-    }
 
-    void allocateBuffer(const uint32_t initialObjectCount, const VulkanResourceService * resourceService, MappedBufferType bufferType) {
-        std::vector<VulkanBDABufferData> shaderBufferDataVector {};
-        for (auto i = 0; i < m_MaxFramesInFlight; ++i) {
-            auto shaderBufferData = resourceService->createBDABuffer(initialObjectCount * getLayoutSize(bufferType));
-            shaderBufferDataVector.emplace_back(shaderBufferData);
-        }
-        MappedBufferGroup bufferGroup(shaderBufferDataVector, initialObjectCount);
-        m_MappedBuffers.emplace(bufferType, std::move(bufferGroup));
-    }
+        uint32_t startIndex = INDEX_UNSET;
 
-    // Note: Currently, we'd have to vkDeviceWaitIdle() to perform this, otherwise bad things can happen
-    void resizeBuffer(const uint32_t newMaxObjectCount, const MappedBufferType bufferToResize) {
-        MappedBufferGroup oldMappedBuffer = m_MappedBuffers[bufferToResize];
-        // TODO support downsizing as well
-        assert(oldMappedBuffer.maxObjectCount < newMaxObjectCount);
+        for (uint32_t i = 0; i < dirtyFlags->size(); ++i) {
+            if (dirtyFlags->at(i) == true) {
+                if (startIndex == INDEX_UNSET) {
+                    startIndex = i;
+                }
+                dirtyFlags->at(i) = false;
+            } else {
+                if (startIndex != INDEX_UNSET) {
+                    const uint32_t endIndex = i;
 
-        const auto resourceService = VulkanResourceServiceLocator::locate();
+                    for (uint32_t frame = 0; frame < m_MaxFramesInFlight; ++frame) {
+                        m_CopyCommands.emplace_back(CopyCommand { type, startIndex, endIndex, frame });
+                    }
 
-        std::vector<VulkanBDABufferData> newBufferData {};
-        for (uint32_t i = 0; i < m_MaxFramesInFlight; ++i) {
-            auto newBuffer = resourceService->createBDABuffer(newMaxObjectCount * getLayoutSize(bufferToResize));
-            resourceService->copyBuffer(oldMappedBuffer.shaderBuffers[i].buffer, newBuffer.buffer, oldMappedBuffer.maxObjectCount * getLayoutSize(bufferToResize));
-
-            resourceService->freeResourcesAndUnmapMemory(oldMappedBuffer.shaderBuffers[i].buffer, oldMappedBuffer.shaderBuffers[i].bufferMemory);
-            newBufferData.emplace_back(newBuffer);
-        }
-
-        MappedBufferGroup newMappedBufferGroup(newBufferData, newMaxObjectCount);
-
-        // Copy old object occupancy data over
-        for (
-            auto newIt = newMappedBufferGroup.occupied.begin(), oldIt = oldMappedBuffer.occupied.begin();
-            oldIt != oldMappedBuffer.occupied.end();
-            ++newIt, ++oldIt
-        ) {
-            *newIt = *oldIt;
-        }
-        newMappedBufferGroup.objectCount = oldMappedBuffer.objectCount;
-
-        m_MappedBuffers[bufferToResize] = newMappedBufferGroup;
-    }
-
-    uint32_t addToMappedBuffer(const MappedBufferType bufferType) {
-        uint32_t bufferDataIndex = 0;
-        MappedBufferGroup & mappedDataBuffer = m_MappedBuffers[bufferType];
-
-        for (const auto occupiedAtIndex : mappedDataBuffer.occupied) {
-            if (!occupiedAtIndex) {
-                break;
-            }
-            bufferDataIndex++;
-        }
-
-        mappedDataBuffer.objectCount++;
-        if (mappedDataBuffer.objectCount >= mappedDataBuffer.maxObjectCount) {
-            auto newMaxObjectCount = mappedDataBuffer.maxObjectCount + 100;
-            resizeBuffer(newMaxObjectCount, bufferType);
-            mappedDataBuffer = m_MappedBuffers[bufferType];
-
-            switch (bufferType) {
-                case MappedBufferType::Transform:
-                    m_Transforms.resize(mappedDataBuffer.maxObjectCount, {});
-                    break;
-                case MappedBufferType::Material:
-                    m_Materials.resize(mappedDataBuffer.maxObjectCount, {});
-                    break;
-                case MappedBufferType::Draw:
-                    m_Draws.resize(mappedDataBuffer.maxObjectCount, {});
-                    break;
-                case MappedBufferType::Light:
-                    m_Lights.resize(mappedDataBuffer.maxObjectCount, {});
-                    break;
-                default:
-                    throw std::runtime_error("Trying to resize an unknown buffer type, something has gone terribly wrong!");
+                    startIndex = INDEX_UNSET;
+                }
             }
         }
 
-        mappedDataBuffer.occupied.at(bufferDataIndex) = true;
+        // Special case - last element is dirty
+        if (startIndex != INDEX_UNSET) {
+            const uint32_t endIndex = dirtyFlags->size();
 
-        return bufferDataIndex;
+            for (uint32_t frame = 0; frame < m_MaxFramesInFlight; ++frame) {
+                m_CopyCommands.emplace_back(CopyCommand { type, startIndex, endIndex, frame });
+            }
+        }
     }
 
 private:
-    std::unordered_map<MappedBufferType, MappedBufferGroup> m_MappedBuffers {};
     uint32_t m_MaxFramesInFlight = 0;
 
-    // Not sure if this should be in this class or somewhere else
-    std::vector<TransformDataBuffer> m_Transforms {};
-    std::vector<MaterialDataBuffer> m_Materials {};
-    std::vector<DrawDataBuffer> m_Draws {};
-    std::vector<LightDataBuffer> m_Lights {};
+    DeviceBuffer<TransformLayout> m_Transforms {};
+    DeviceBuffer<MaterialLayout> m_Materials {};
+    DeviceBuffer<DrawLayout> m_Draws {};
+    DeviceBuffer<LightLayout> m_Lights {};
+
+    uint32_t m_CopiedFrames = 0;
+    std::vector<CopyCommand> m_CopyCommands {};
 };

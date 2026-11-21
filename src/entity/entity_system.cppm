@@ -43,7 +43,6 @@ public:
     }
 
     // Creates all the entities that we will be drawing
-    // TODO modularize
     void setupWorld(AssetManager & assetManager) {
         uint32_t innerMazeWidth = 30;
         uint32_t innerMazeHeight = 30;
@@ -75,7 +74,7 @@ public:
                 createObject(
                     assetManager,
                     tilePrefix + "entranceWall",
-                    CUBE_RED_MODEL_NAME,
+                    WALL_CUBE_MODEL_NAME,
                     entranceWallPosition,
                     rotation,
                     scale
@@ -89,7 +88,7 @@ public:
                 createObject(
                     assetManager,
                     tilePrefix + "exitWall",
-                    CUBE_RED_MODEL_NAME,
+                    WALL_CUBE_MODEL_NAME,
                     exitWallPosition,
                     rotation,
                     scale
@@ -102,14 +101,40 @@ public:
 
             std::string tileName = tilePrefix + std::to_string(currentMazeX + currentMazeY * totalMazeWidth);
 
+            std::string modelName;
+            if (c.type == MazeCellType::Wall) {
+                modelName = WALL_CUBE_MODEL_NAME;
+            } else if (cellIndex == walledMaze.entrance) {
+                modelName = FLOOR_START_MODEL_NAME;
+            } else if (cellIndex == walledMaze.exit) {
+                modelName = FLOOR_FINISH_MODEL_NAME;
+            } else {
+                modelName = FLOOR_MODEL_NAME;
+            }
+
             createObject(
                 assetManager,
                 tileName,
-                c.type == MazeCellType::Corridor ? WALL_MODEL_NAME : CUBE_RED_MODEL_NAME,
+                modelName,
                 position,
                 rotation,
                 scale
             );
+
+            if (c.type == MazeCellType::Corridor) {
+                tileName += "_ceiling";
+                position.y += 2.0f;
+                rotation.x += 180.0f;
+
+                createObject(
+                    assetManager,
+                    tileName,
+                    modelName,
+                    position,
+                    rotation,
+                    scale
+                );
+            }
 
             currentMazeX++;
             if (currentMazeX == totalMazeWidth) {
@@ -220,6 +245,7 @@ public:
         if (drawLightCubes) {
             m_LightCubeSystem.run();
         }
+        deviceMapper->prepareCopyCommands();
         deviceMapper->uploadToGPU(frameIndex);
 
         m_RenderSystem.run();
@@ -339,17 +365,21 @@ private:
                 uint32_t lightIndex = l.index;
                 uint32_t transformIndex = t.index;
 
-                auto * lightPtr = deviceMapper->getLight(lightIndex);
-                lightPtr->layout.enabled = l.enabled;
-
                 if (t.dirty) {
                     mapTransform(t, deviceMapper);
+
+                    auto & lightDeviceData = deviceMapper->getLight(lightIndex);
+                    lightDeviceData.transformIndex = transformIndex;
+
+                    t.dirty = false;
                 }
-                lightPtr->layout.transformIndex = transformIndex;
 
                 if (l.dirty) {
-                    lightPtr->layout.color = l.color;
-                    lightPtr->layout.intensity = l.intensity;
+                    auto & lightDeviceData = deviceMapper->getLight(lightIndex);
+
+                    lightDeviceData.enabled = l.enabled;
+                    lightDeviceData.color = l.color;
+                    lightDeviceData.intensity = l.intensity;
 
                     l.dirty = false;
                 }
@@ -417,10 +447,10 @@ private:
     }
 
     static void mapTransform(Components::Transform & t, DeviceMapper * deviceMapper) {
-        auto * transformPtr = deviceMapper->getTransform(t.index);
-        transformPtr->layout.position = glm::vec4(t.position, 1.0f);
-        transformPtr->layout.rotation = glm::vec4(t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w);
-        transformPtr->layout.scale = glm::vec4(t.scale, 0.0f);
+        auto & transformDeviceData = deviceMapper->getTransform(t.index);
+        transformDeviceData.position = glm::vec4(t.position, 1.0f);
+        transformDeviceData.rotation = glm::vec4(t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w);
+        transformDeviceData.scale = glm::vec4(t.scale, 0.0f);
     }
 
 private:
