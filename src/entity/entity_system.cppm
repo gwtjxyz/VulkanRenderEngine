@@ -15,7 +15,7 @@ import components;
 import constants;
 import core_types;
 import device_mapper;
-import pipeline_manager;
+import draw_executor;
 import maze_builder;
 import render_types;
 import scene_graph_types;
@@ -239,16 +239,22 @@ public:
 
     void prepareAndRender(const uint32_t frameIndex, const bool drawLightCubes) const {
         auto * deviceMapper = DeviceMapperLocator::locate();
+        auto * drawExecutor = DrawExecutorLocator::locate();
 
         m_LightPrepareSystem.run();
         m_ObjectPrepareSystem.run();
         if (drawLightCubes) {
             m_LightCubeSystem.run();
         }
+
+        drawExecutor->prepareForNextFrame();
+
+        m_RenderPrepareSystem.run();
+
+        drawExecutor->uploadBatchesToGPU();
         deviceMapper->prepareCopyCommands();
         deviceMapper->uploadToGPU(frameIndex);
-
-        m_RenderSystem.run();
+        drawExecutor->executeDrawIndirect(frameIndex);
     }
 
     void setPosition(const std::string & entityName, const glm::vec3 pos) const {
@@ -404,7 +410,7 @@ private:
     }
 
     void prepareRenderSystem() {
-        m_RenderSystem = m_World.system<Components::Transform, Components::Mesh>().each(
+        m_RenderPrepareSystem = m_World.system<Components::Transform, Components::Mesh>().each(
             [this](flecs::iter & it, size_t row, Components::Transform & t, Components::Mesh & m) {
                 if (!m.instance.getAsset() || !m.instance.isLoaded()) {
                     return;
@@ -412,17 +418,16 @@ private:
 
                 auto drawCallData = m.instance.prepareDrawData();
                 if (!drawCallData.empty()) {
-                    auto * pipelineManager = PipelineManagerLocator::locate();
+                    auto * drawExecutor = DrawExecutorLocator::locate();
                     for (auto & drawCall : drawCallData) {
-                        // TODO draw call sorting, culling, etc
-                        pipelineManager->executeDrawCall(drawCall);
+                        drawExecutor->batchDrawCall(drawCall);
                     }
                 }
             }
         );
     }
 
-    // TODO change - very hacky, this should ideally use instanced rendering and probably not be a separate system
+    // FIXME drawing light cubes broke for some reason
     void prepareLightCubeSystem() {
         m_LightCubeSystem = m_World.system<Components::Transform, Components::Light>().each(
             [this](flecs::iter & it, size_t row, Components::Transform & t, Components::Light & l) {
@@ -437,9 +442,9 @@ private:
 
                 auto drawCallData = l.cubeDisplay.prepareDrawData();
                 if (!drawCallData.empty()) {
-                    auto * pipelineManager = PipelineManagerLocator::locate();
+                    auto * drawExecutor = DrawExecutorLocator::locate();
                     for (auto & drawCall : drawCallData) {
-                        pipelineManager->executeDrawCall(drawCall);
+                        drawExecutor->batchDrawCall(drawCall);
                     }
                 }
             }
@@ -465,7 +470,7 @@ private:
 
     flecs::system m_ObjectPrepareSystem;
     flecs::system m_LightPrepareSystem;
-    flecs::system m_RenderSystem;
+    flecs::system m_RenderPrepareSystem;
 
     // TODO change - temporary solution, not very clean
     flecs::system m_LightCubeSystem;

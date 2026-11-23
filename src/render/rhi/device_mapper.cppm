@@ -50,6 +50,8 @@ struct MaterialLayout {
     glm::vec3 unused {};                            // padding
 };
 
+// FIXME: this is kinda named incorrectly: "Draw" is not really a draw, but rather a model+material combo.
+// E.g. we can have 100 instances of the same object and it would still use "one" draw.
 struct DrawLayout {
     uint32_t transformIndex = INDEX_UNSET;
     uint32_t materialIndex = INDEX_UNSET;
@@ -63,8 +65,12 @@ struct LightLayout {
     hlsl_bool enabled = false;
 };
 
+struct BatchLayout {
+    uint32_t instanceTransformIndex = INDEX_UNSET;
+};
+
 struct AddressMappings {
-    vk::DeviceAddress transformAddress, materialAddress, drawAddress, lightAddress;
+    vk::DeviceAddress transformAddress, materialAddress, drawAddress, lightAddress, batchAddress;
 };
 
 struct CopyCommand {
@@ -190,21 +196,21 @@ private:
         assert(newMaxObjectCount > m_GpuBufferGroup.maxObjectCount && "Must be expanding to a size bigger than the current size.");
 
         auto * vulkanResourceService = VulkanResourceServiceLocator::locate();
-        const uint32_t maxFramesInFlight = m_GpuBufferGroup.bdaBuffers.size();
 
         m_CpuBuffer.data.resize(newMaxObjectCount, {});
         m_CpuBuffer.dirty.resize(newMaxObjectCount, true);
 
         std::vector<VulkanBDABufferData> newBdaBuffers {};
+        const uint32_t maxFramesInFlight = m_GpuBufferGroup.bdaBuffers.size();
         for (auto i = 0; i < maxFramesInFlight; ++i) {
             auto newBdaBuffer = vulkanResourceService->createBDABuffer(newMaxObjectCount * sizeof(T));
             vulkanResourceService->copyBuffer(
-                m_GpuBufferGroup.bdaBuffers[i].buffer,
+                m_GpuBufferGroup.bdaBuffers.at(i).buffer,
                 newBdaBuffer.buffer,
                 m_GpuBufferGroup.maxObjectCount * sizeof(T)
             );
 
-            vulkanResourceService->freeResourcesAndUnmapMemory(m_GpuBufferGroup.bdaBuffers[i].buffer, m_GpuBufferGroup.bdaBuffers[i].bufferMemory);
+            vulkanResourceService->freeResourcesAndUnmapMemory(m_GpuBufferGroup.bdaBuffers.at(i).buffer, m_GpuBufferGroup.bdaBuffers.at(i).bufferMemory);
             newBdaBuffers.emplace_back(newBdaBuffer);
         }
 
@@ -216,6 +222,94 @@ private:
 private:
     CPUBuffer<T> m_CpuBuffer {};
     GPUBufferGroup m_GpuBufferGroup {};
+};
+
+// Special case - care about it being sorted, so it's a separate thing from other device buffers
+// Caller is responsible for sorting elements before storing them here
+class BatchBuffer {
+public:
+    BatchBuffer() = default;
+
+    void initialize(const uint32_t initialObjectCount, const uint32_t maxFramesInFlight) {
+
+        VulkanResourceService * vulkanResourceService = VulkanResourceServiceLocator::locate();
+
+        for (auto i = 0; i < maxFramesInFlight; ++i) {
+            auto bdaBuffer = vulkanResourceService->createBDABuffer(initialObjectCount * sizeof(BatchLayout));
+            m_GpuBuffers.emplace_back(bdaBuffer);
+        }
+
+        m_MaxGpuObjectCount = initialObjectCount;
+    }
+
+    void destroy() {
+        VulkanResourceService * vulkanResourceService = VulkanResourceServiceLocator::locate();
+
+        for (auto & b : m_GpuBuffers) {
+            vulkanResourceService->freeResourcesAndUnmapMemory(b.buffer, b.bufferMemory);
+        }
+
+        m_GpuBuffers.clear();
+        m_GpuObjectCount = 0;
+        m_MaxGpuObjectCount = 0;
+
+        m_CpuBuffer.clear();
+        m_Dirty = true;
+    }
+
+    void addToBack(uint32_t instanceTransformIndex) {
+        m_GpuObjectCount++;
+        if (m_GpuObjectCount == m_MaxGpuObjectCount) {
+            const uint32_t newMaxObjectCount = m_MaxGpuObjectCount + 100;
+            expand(newMaxObjectCount);
+        }
+
+        m_CpuBuffer.emplace_back(instanceTransformIndex);
+        assert(m_GpuObjectCount == m_CpuBuffer.size());
+        m_Dirty = true;
+    }
+
+    void clearContents() {
+        m_CpuBuffer.clear();
+        m_GpuObjectCount = 0;
+        m_Dirty = true;
+    }
+
+    vk::DeviceAddress getBufferDeviceAddressForFrame(const uint32_t frameIndex) const {
+        return m_GpuBuffers.at(frameIndex).bufferDeviceAddress;
+    }
+
+    void copyToGPU(const uint32_t frameIndex) {
+        if (m_Dirty) {
+            std::memcpy(m_GpuBuffers.at(frameIndex).mappedMemory, m_CpuBuffer.data(), m_GpuObjectCount * sizeof(BatchLayout));
+        }
+        m_Dirty = false;
+    }
+
+private:
+    void expand(const uint32_t newMaxObjectCount) {
+        assert(newMaxObjectCount > m_MaxGpuObjectCount && "Must be expanding to a size bigger than the current size.");
+
+        auto * vulkanResourceService = VulkanResourceServiceLocator::locate();
+
+        const uint32_t maxFramesInFlight = m_GpuBuffers.size();
+        for (auto i = 0; i < maxFramesInFlight; ++i) {
+            vulkanResourceService->freeResourcesAndUnmapMemory(m_GpuBuffers.at(i).buffer, m_GpuBuffers.at(i).bufferMemory);
+            m_GpuBuffers.at(i) = vulkanResourceService->createBDABuffer(newMaxObjectCount * sizeof(BatchLayout));
+
+            std::memcpy(m_GpuBuffers.at(i).mappedMemory, m_CpuBuffer.data(), m_GpuObjectCount * sizeof(BatchLayout));
+        }
+
+        m_MaxGpuObjectCount = newMaxObjectCount;
+    }
+
+private:
+    std::vector<BatchLayout> m_CpuBuffer {};
+    bool m_Dirty = true;
+
+    std::vector<VulkanBDABufferData> m_GpuBuffers {};
+    uint32_t m_GpuObjectCount = 0;
+    uint32_t m_MaxGpuObjectCount = 0;
 };
 
 export class DeviceMapper;
@@ -237,6 +331,8 @@ public:
         m_Materials.initialize(initialObjectCount, m_MaxFramesInFlight);
         m_Draws.initialize(initialObjectCount, m_MaxFramesInFlight);
         m_Lights.initialize(initialObjectCount, m_MaxFramesInFlight);
+
+        m_BatchData.initialize(initialObjectCount + 400, m_MaxFramesInFlight);
     }
 
     void freeResources() {
@@ -244,6 +340,8 @@ public:
         m_Materials.destroy();
         m_Draws.destroy();
         m_Lights.destroy();
+
+        m_BatchData.destroy();
     }
 
     void prepareCopyCommands() {
@@ -297,6 +395,9 @@ public:
 
             it = m_CopyCommands.erase(it);
         }
+
+        // TODO: Doing this every frame for now, add similar mechanism as for other buffers
+        m_BatchData.copyToGPU(frameIndex);
     }
 
     AddressMappings getAddressMappingsForFrame(const uint32_t frameIndex) const {
@@ -305,6 +406,8 @@ public:
         result.materialAddress = m_Materials.getBufferDeviceAddressForFrame(frameIndex);
         result.drawAddress = m_Draws.getBufferDeviceAddressForFrame(frameIndex);
         result.lightAddress = m_Lights.getBufferDeviceAddressForFrame(frameIndex);
+
+        result.batchAddress = m_BatchData.getBufferDeviceAddressForFrame(frameIndex);
 
         return result;
     }
@@ -377,6 +480,14 @@ public:
         return m_Lights.getObjectCount();
     }
 
+    void resetBatchData() {
+        m_BatchData.clearContents();
+    }
+
+    void addInstanceTransformToBatch(const uint32_t instanceTransformIndex) {
+        m_BatchData.addToBack(instanceTransformIndex);
+    }
+
 private:
     void prepareCopyCommandsForBuffer(const BufferType type) {
         std::vector<bool> * dirtyFlags;
@@ -435,6 +546,8 @@ private:
     DeviceBuffer<MaterialLayout> m_Materials {};
     DeviceBuffer<DrawLayout> m_Draws {};
     DeviceBuffer<LightLayout> m_Lights {};
+
+    BatchBuffer m_BatchData {};
 
     uint32_t m_CopiedFrames = 0;
     std::vector<CopyCommand> m_CopyCommands {};

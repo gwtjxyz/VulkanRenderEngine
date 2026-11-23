@@ -42,13 +42,13 @@ struct VSOutput {
     bool drawing : DRAWING;
 };
 
-VSOutput VSMain(VSInput input) {
+VSOutput VSMain(VSInput input, [[vk::builtin("DrawIndex")]] uint gl_DrawIDARB : INDIRECT_ID) {
     VSOutput output;
 
     // First, check if we actually need to draw anything
     // for entities without an active draw component, drawIndex will be of a special value
 
-    if (vertexConstants.drawIndex == UINT32_MAX || vertexConstants.instanceTransformIndex == UINT32_MAX) {
+    if (vertexConstants.drawIndex == UINT32_MAX) {
         output.drawing = false;
         return output;
     }
@@ -71,7 +71,12 @@ VSOutput VSMain(VSInput input) {
     // To properly place something in the world, we need to combine both.
     TransformLayout sceneTransformData = rawVkBufferLoad<TransformLayout>(vertexConstants.transformAddress, drawData.transformIndex);
     float4x4 sceneMatrix = buildModelMatrix(sceneTransformData.position, sceneTransformData.rotation, sceneTransformData.scale);
-    TransformLayout instanceTransformData = rawVkBufferLoad<TransformLayout>(vertexConstants.transformAddress, vertexConstants.instanceTransformIndex);
+
+    uint64_t drawCommandOffset = sizeof(BatchLayout) * vertexConstants.batchOffset;
+    uint64_t offsetBatchAddress = vertexConstants.batchAddress + drawCommandOffset;
+    BatchLayout batchData = rawVkBufferLoad<BatchLayout>(offsetBatchAddress, gl_DrawIDARB);
+
+    TransformLayout instanceTransformData = rawVkBufferLoad<TransformLayout>(vertexConstants.transformAddress, batchData.instanceTransformIndex);
     float4x4 instanceMatrix = buildModelMatrix(instanceTransformData.position, instanceTransformData.rotation, instanceTransformData.scale);
 
     float4x4 modelMatrix = mul(instanceMatrix, sceneMatrix);

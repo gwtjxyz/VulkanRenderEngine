@@ -194,7 +194,7 @@ target_sources(VulkanRenderEngine PUBLIC
         src/render/render_types.cppm
         src/render/rhi/vulkan_instance.cppm src/render/rhi/vulkan_resource_service.cppm
         src/render/rhi/device_mapper.cppm src/render/rhi/pipeline_manager.cppm
-        src/render/rhi/descriptor_manager.cppm
+        src/render/rhi/descriptor_manager.cppm src/render/rhi/draw_executor.cppm
 )
 
 target_compile_definitions(VulkanRenderEngine PRIVATE USE_CPP20_MODULES=1)

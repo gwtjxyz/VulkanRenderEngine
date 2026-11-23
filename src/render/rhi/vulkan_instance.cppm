@@ -300,6 +300,7 @@ private:
                                                     vk::PhysicalDeviceVulkan13Features,
                                                     vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
         bool supportsRequiredFeatures =
+            features.get<vk::PhysicalDeviceFeatures2>().features.multiDrawIndirect &&
             features.get<vk::PhysicalDeviceFeatures2>().features.samplerAnisotropy &&
             features.get<vk::PhysicalDeviceFeatures2>().features.shaderInt64 &&
             features.get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters &&
@@ -346,8 +347,9 @@ private:
         > featureChain = {
             {                                                                   // vk::PhysicalDeviceFeatures2
                 .features = {
+                    .multiDrawIndirect = true,
                     .samplerAnisotropy = true,
-                    .shaderInt64 = true
+                    .shaderInt64 = true,
                 }
             },
             { .shaderDrawParameters = true },                                 // Enable shader draw parameters from Vulkan 1.1, necessary for shader objects (I think)

@@ -13,7 +13,7 @@ struct LightLayout {
     uint transformIndex;
     float3 color;
     float intensity;
-    uint enabled;
+    bool enabled;
 };
 
 struct TransformLayout {
@@ -26,6 +26,10 @@ struct MaterialLayout {
     float4 materialTint;
     uint textureIndex;
     float3 unused;
+};
+
+struct BatchLayout {
+    uint instanceTransformIndex;
 };
 
 /** vk::BufferPointer class:
@@ -54,12 +58,14 @@ struct VertexPushConstants {
     uint64_t transformAddress;
     uint64_t materialAddress;
 
+    uint64_t batchAddress;
+
     uint particlesEnabled;
     int lightMode;
     uint lightCount;
 
     uint drawIndex;
-    uint instanceTransformIndex;
+    uint batchOffset;
 };
 
 [[vk::push_constant]]

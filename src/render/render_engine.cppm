@@ -31,6 +31,7 @@ import components;
 import entity_system;
 import descriptor_manager;
 import device_mapper;
+import draw_executor;
 import model_parser;
 import pipeline_manager;
 import platform;
@@ -79,6 +80,8 @@ private:
         VulkanResourceServiceLocator::provide(m_VulkanResourceService.get());
         m_DescriptorManager = std::make_shared<DescriptorManager>();
         DescriptorManagerLocator::provide(m_DescriptorManager.get());
+        m_DrawExecutor = std::make_shared<DrawExecutor>();
+        DrawExecutorLocator::provide(m_DrawExecutor.get());
         m_PipelineManager = std::make_shared<PipelineManager>();
         PipelineManagerLocator::provide(m_PipelineManager.get());
         m_DeviceMapper = std::make_shared<DeviceMapper>();
@@ -208,6 +211,9 @@ private:
         m_TextureManager->initialize();
         loadEntities();
 
+        // Indirect draw executor
+        m_DrawExecutor->initialize();
+
         // Pipeline layout setup
         m_PipelineManager->createComputePipeline();
         m_PipelineManager->createGraphicsPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
@@ -317,6 +323,7 @@ private:
         m_DescriptorManager->destroy();
         m_TextureManager->destroyAll();
         m_AssetManager.destroyAll();
+        m_DrawExecutor->destroy();
         m_PipelineManager->destroyAll();
 
         m_DeviceMapper->freeResources();
@@ -1080,8 +1087,10 @@ private:
         m_PipelineManager->setParticlesEnabled(m_ParticlesEnabled);
 
         // Draw particles
-        m_PipelineManager->setAndBindActivePipeline(POINT_GRAPHICS_PIPELINE_NAME);
-        m_PipelineManager->bindAndDraw(m_ComputeDataBuffers[m_FrameIndex].buffer, PARTICLE_COUNT, 1);
+        if (m_ParticlesEnabled) {
+            m_PipelineManager->setAndBindActivePipeline(POINT_GRAPHICS_PIPELINE_NAME);
+            m_PipelineManager->bindAndDraw(m_ComputeDataBuffers[m_FrameIndex].buffer, PARTICLE_COUNT, 1);
+        }
 
         // Common model rendering bindings
         m_PipelineManager->setAndBindActivePipeline(GRAPHICS_PIPELINE_NAME);
@@ -1171,11 +1180,13 @@ private:
 
         m_Instance.getDevice().waitIdle();
 
+        m_DrawExecutor->destroy();
         m_PipelineManager->destroyAll();
 
         cleanupSwapChain();
         createSwapChain();
 
+        m_DrawExecutor->initialize();
         m_PipelineManager->createComputePipeline();
         m_PipelineManager->createGraphicsPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
         m_PipelineManager->createPointGraphicsPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
@@ -1191,6 +1202,7 @@ private:
 
         m_PipelineManager->destroyAll();
 
+        m_DrawExecutor->initialize();
         m_PipelineManager->createComputePipeline();
         m_PipelineManager->createGraphicsPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
         m_PipelineManager->createPointGraphicsPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
@@ -1202,6 +1214,7 @@ private:
     std::shared_ptr<VulkanResourceService> m_VulkanResourceService = nullptr;
     std::shared_ptr<DeviceMapper> m_DeviceMapper = nullptr;
     std::shared_ptr<DescriptorManager> m_DescriptorManager = nullptr;
+    std::shared_ptr<DrawExecutor> m_DrawExecutor = nullptr;
     std::shared_ptr<PipelineManager> m_PipelineManager = nullptr;
     std::shared_ptr<ModelParser> m_ModelParser = nullptr;
     std::shared_ptr<TextureManager> m_TextureManager = nullptr;

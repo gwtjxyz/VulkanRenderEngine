@@ -62,13 +62,15 @@ private:
         vk::DeviceAddress transformAddress;
         vk::DeviceAddress materialAddress;
 
+        vk::DeviceAddress batchAddress;
+
         uint32_t particlesEnabled;
         LightMode lightMode;
         uint32_t lightCount;
 
         // Set these while rendering entities
         uint32_t drawIndex;
-        uint32_t instanceTransformIndex;
+        uint32_t batchOffset;
     };
 
     struct ComputePushConstants {
@@ -119,7 +121,7 @@ public:
             .bindPoint = vk::PipelineBindPoint::eCompute,
         };
 
-        m_PipelineMap.insert({COMPUTE_PIPELINE_NAME, std::move(newPipeline)});
+        m_PipelineMap.insert({ COMPUTE_PIPELINE_NAME, std::move(newPipeline) });
     }
 
     void createGraphicsPipeline(vk::SampleCountFlagBits msaaSamples, vk::SurfaceFormatKHR swapChainSurfaceFormat) {
@@ -244,7 +246,7 @@ public:
             .descriptorSet = descriptorManager->getTextureDescriptorSet()
         };
 
-        m_PipelineMap.insert({GRAPHICS_PIPELINE_NAME, std::move(newPipeline)});
+        m_PipelineMap.insert({ GRAPHICS_PIPELINE_NAME, std::move(newPipeline) });
     }
 
     void createPointGraphicsPipeline(vk::SampleCountFlagBits msaaSamples, vk::SurfaceFormatKHR swapChainSurfaceFormat) {
@@ -370,7 +372,7 @@ public:
             .bindPoint = vk::PipelineBindPoint::eGraphics,
         };
 
-        m_PipelineMap.insert({POINT_GRAPHICS_PIPELINE_NAME, std::move(newPipeline)});
+        m_PipelineMap.insert({ POINT_GRAPHICS_PIPELINE_NAME, std::move(newPipeline) });
     }
 
     void setAndBindActivePipeline(const std::string & pipelineName) {
@@ -404,6 +406,8 @@ public:
         m_VertexPushConstants.lightAddress = addressMappings.lightAddress;
         m_VertexPushConstants.transformAddress = addressMappings.transformAddress;
         m_VertexPushConstants.materialAddress = addressMappings.materialAddress;
+
+        m_VertexPushConstants.batchAddress = addressMappings.batchAddress;
     }
 
     void setLightCount(const uint32_t lightCount) {
@@ -426,11 +430,6 @@ public:
     void setParticlesEnabled(const bool particlesEnabled) {
         m_ComputePushConstants.particlesEnabled = particlesEnabled;
         m_VertexPushConstants.particlesEnabled = particlesEnabled;
-    }
-
-    void bindVertices(const vk::Buffer vertexBuffer, const vk::Buffer indexBuffer) const {
-        m_ActiveCommandBuffer.bindVertexBuffers(0, vertexBuffer, { 0 });
-        m_ActiveCommandBuffer.bindIndexBuffer(indexBuffer, 0, vk::IndexType::eUint32);
     }
 
     void bindVertexPushConstants() const {
@@ -460,24 +459,16 @@ public:
         m_ActiveCommandBuffer.draw(vertexCount, instanceCount, 0, 0);
     }
 
-    void bindAndDrawIndexed(const uint32_t drawIndex, const vk::Buffer vertexBuffer, const vk::Buffer indexBuffer, const uint32_t indexCount, const uint32_t instanceCount) {
-        m_VertexPushConstants.drawIndex = drawIndex;
-        bindVertexPushConstants();
-
-        m_ActiveCommandBuffer.bindVertexBuffers(0, vertexBuffer, { 0 });
-        m_ActiveCommandBuffer.bindIndexBuffer(indexBuffer, 0, vk::IndexType::eUint32);
-        m_ActiveCommandBuffer.drawIndexed(indexCount, instanceCount, 0, 0, 0);
+    vk::CommandBuffer & getActiveCommandBuffer() {
+        return m_ActiveCommandBuffer;
     }
 
-    // TODO add instancing support
-    void executeDrawCall(SceneGraphTypes::DrawCallData & drawData) {
-        m_VertexPushConstants.drawIndex = drawData.drawIndex;
-        m_VertexPushConstants.instanceTransformIndex = drawData.instanceTransformIndex;
-        bindVertexPushConstants();
+    void setVertexDrawIndex(const uint32_t drawIndex) {
+        m_VertexPushConstants.drawIndex = drawIndex;
+    }
 
-        m_ActiveCommandBuffer.bindVertexBuffers(0, drawData.vertexBuffer, { drawData.vertexOffsetBytes });
-        m_ActiveCommandBuffer.bindIndexBuffer(drawData.indexBuffer, 0, vk::IndexType::eUint32);
-        m_ActiveCommandBuffer.drawIndexed(drawData.indexCount, 1, drawData.firstIndex, 0, 0);
+    void setVertexBatchOffset(const uint32_t batchOffset) {
+        m_VertexPushConstants.batchOffset = batchOffset;
     }
 
     void destroyAll() {

@@ -161,7 +161,7 @@ export struct DrawCallData {
     uint32_t instanceTransformIndex;
     uint32_t drawIndex;
     vk::Buffer vertexBuffer;
-    uint32_t vertexOffsetBytes;
+    uint32_t vertexOffset;
     vk::Buffer indexBuffer;
     uint32_t firstIndex;
     uint32_t indexCount;
@@ -366,7 +366,7 @@ public:
                 data.instanceTransformIndex = instanceTransformIndex;
                 data.drawIndex = m_DrawMap.at({ meshIndex, meshPrimitiveIndex });
                 data.vertexBuffer = m_Scene.vertexBuffer.buffer;
-                data.vertexOffsetBytes = mp.vertexOffset * sizeof(SceneGraphTypes::Attribute);
+                data.vertexOffset = mp.vertexOffset;
                 data.indexBuffer = m_Scene.indexBuffer.buffer;
                 data.firstIndex = mp.firstIndex;
                 data.indexCount = mp.indexCount;

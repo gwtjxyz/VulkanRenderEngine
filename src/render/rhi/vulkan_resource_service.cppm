@@ -41,6 +41,12 @@ export struct VulkanBufferData {
     vk::DeviceMemory bufferMemory = nullptr;
 };
 
+export struct SizedVulkanBufferData {
+    vk::DeviceSize size = 0;
+    vk::Buffer buffer = nullptr;
+    vk::DeviceMemory bufferMemory = nullptr;
+};
+
 // https://docs.vulkan.org/samples/latest/samples/extensions/buffer_device_address/README.html
 export struct VulkanBDABufferData {
     vk::Buffer buffer = nullptr;
@@ -112,6 +118,53 @@ public:
         };
 
         return m_Instance->getDevice().createSampler(samplerInfo);
+    }
+
+    SizedVulkanBufferData createDrawIndirectGPUBuffer(const vk::DeviceSize bufferSize) const {
+        SizedVulkanBufferData gpuBuffer {};
+        gpuBuffer.size = bufferSize;
+
+        createBuffer(
+            bufferSize,
+            vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eIndirectBuffer,
+            vk::MemoryPropertyFlagBits::eDeviceLocal,
+            gpuBuffer.buffer,
+            gpuBuffer.bufferMemory
+        );
+
+        return gpuBuffer;
+    }
+
+    SizedVulkanBufferData createDrawIndirectStagingBuffer(const vk::DeviceSize bufferSize) const {
+        SizedVulkanBufferData stagingBuffer {};
+        stagingBuffer.size = bufferSize;
+
+        createBuffer(
+            bufferSize,
+            vk::BufferUsageFlagBits::eTransferSrc,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+            stagingBuffer.buffer,
+            stagingBuffer.bufferMemory
+        );
+
+        return stagingBuffer;
+    }
+
+    // TODO size checks for destination buffer?
+    template<typename T>
+    void stageAndTransfer(SizedVulkanBufferData & src, SizedVulkanBufferData & dst, std::vector<T> & data) {
+        const auto dataSize = data.size() * sizeof(T);
+        assert(dst.buffer != nullptr && dst.size >= dataSize && "GPU buffer must exist and be big enough to be copied into");
+        if (src.buffer == nullptr || src.size < dataSize) {
+            freeResources(src.buffer, src.bufferMemory);
+            src = createDrawIndirectStagingBuffer(dataSize);
+        }
+
+        void * stagingData = m_Instance->getDevice().mapMemory(src.bufferMemory, 0, dataSize);
+        memcpy(stagingData, data.data(), dataSize);
+        m_Instance->getDevice().unmapMemory(src.bufferMemory);
+
+        copyBuffer(src.buffer, dst.buffer, dataSize);
     }
 
     template <typename T>
