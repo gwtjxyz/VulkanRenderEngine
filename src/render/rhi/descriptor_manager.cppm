@@ -124,7 +124,7 @@ private:
         };
 
         vk::DescriptorSetLayoutBindingFlagsCreateInfo bindingFlagsInfo = {
-            .bindingCount = bindingFlags.size(),
+            .bindingCount = static_cast<uint32_t>(bindingFlags.size()),
             .pBindingFlags = bindingFlags.data()
         };
 

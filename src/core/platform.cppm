@@ -21,7 +21,7 @@ export module platform;
 import std;
 #endif
 
-const std::string PROJECT_DIR = "VulkanHppTutorial"; // TODO un-hardcode?
+const std::string PROJECT_DIR = "VulkanRenderEngine"; // TODO un-hardcode?
 
 export std::filesystem::path pathFromProjectDir(const std::string & relativePath) {
     auto currentPath = std::filesystem::current_path();

@@ -115,7 +115,7 @@ public:
         buffer.Ptr = sourceBlob->GetBufferPointer();
         buffer.Size = sourceBlob->GetBufferSize();
 
-        CComPtr<IDxcResult> compilationResult {nullptr};
+        CComPtr<IDxcResult> compilationResult { nullptr };
         hres = m_Compiler->Compile(
             &buffer,
             arguments.data(),
@@ -180,6 +180,7 @@ public:
 
         return shaderInfo;
     }
+
 private:
     CComPtr<IDxcLibrary> m_Library;
     CComPtr<IDxcCompiler3> m_Compiler;

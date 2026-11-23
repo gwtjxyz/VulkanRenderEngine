@@ -15,6 +15,8 @@ import std;
 export constexpr uint32_t WIDTH = 1280;
 export constexpr uint32_t HEIGHT = 720;
 export constexpr uint32_t PARTICLE_COUNT = 8192;
+export constexpr uint32_t MAZE_WIDTH = 20;
+export constexpr uint32_t MAZE_HEIGHT = 40;
 
 // OBJ
 

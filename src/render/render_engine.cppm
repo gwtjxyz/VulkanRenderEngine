@@ -109,12 +109,12 @@ private:
         glfwSetInputMode(m_Window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     }
 
-    static void framebufferResizeCallback(GLFWwindow * window, int width, int height) {
+    static void framebufferResizeCallback(GLFWwindow * window, [[maybe_unused]] int width, [[maybe_unused]] int height) {
         auto app = static_cast<RenderEngine *>(glfwGetWindowUserPointer(window));
         app->m_FramebufferResized = true;
     }
 
-    static void keyCallback(GLFWwindow * window, int key, int scancode, int action, int mods) {
+    static void keyCallback(GLFWwindow * window, int key, [[maybe_unused]] int scancode, int action, [[maybe_unused]] int mods) {
         auto app = static_cast<RenderEngine *>(glfwGetWindowUserPointer(window));
         if (key == GLFW_KEY_R && action == GLFW_PRESS) {
             app->m_ShadersSetToReload = true;
@@ -178,7 +178,7 @@ private:
         app->m_Camera.processMouseMovement(xOffset, yOffset);
     }
 
-    static void scrollCallback(GLFWwindow * window, double xOffset, double yOffset) {
+    static void scrollCallback(GLFWwindow * window, double [[maybe_unused]] xOffset, double yOffset) {
         ImGuiIO & io = ImGui::GetIO();
         if (io.WantCaptureMouse) {
             return;
@@ -463,8 +463,7 @@ private:
         m_FrameIndex = (m_FrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
-    // In the future we will extract it to somewhere else (possibly a separate class/system?),
-    // but for now, this isn't really required
+    // In the future will probably extract it to somewhere else (possibly a separate class/system?)
     void drawUI() {
         // Initial window size
         const ImGuiViewport * mainViewport = ImGui::GetMainViewport();
@@ -493,6 +492,12 @@ private:
         ImGui::Text("Controls: WASD to move, Space/Control to move up/down");
         ImGui::Text("Esc to show/hide mouse, Q to exit, R to reload shaders");
         ImGui::Text("G to toggle gravity, M to toggle minimap");
+        ImGui::Spacing();
+        ImGui::Text("To change the maze size, change the");
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 1.0f, 1.0f, 1.0f));
+        ImGui::Text("'MAZE_WIDTH' and 'MAZE_HEIGHT'");
+        ImGui::PopStyleColor();
+        ImGui::Text("parameters inside constants.cppm.");
         ImGui::Spacing();
 
         if (ImGui::CollapsingHeader("Shader Controls", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -540,7 +545,7 @@ private:
                 m_ObjectNamesOutOfDate = false;
             }
 
-            ImGui::Combo("Object", &selectedObject, m_ObjectNames.data(), m_ObjectNames.size());
+            ImGui::Combo("Object", &selectedObject, m_ObjectNames.data(), static_cast<int>(m_ObjectNames.size()));
             if (selectedObject != -1) {
                 // Need to display controls for changing object's transform
                 auto objectName = m_ObjectNames.at(selectedObject);
@@ -608,7 +613,7 @@ private:
             ImGui::SameLine(0.0f, spacing);
             if (ImGui::Button("Add")) {
                 m_EntitySystem.createLight(m_AssetManager);
-                selectedLight = m_EntitySystem.getLightNames().size() - 1;
+                selectedLight = static_cast<int>(m_EntitySystem.getLightNames().size() - 1);
                 lightCount++;
 
                 m_LightNamesOutOfDate = true;
@@ -718,7 +723,7 @@ private:
                 ImGui::SliderInt("Light Type", &lightType, 0, 2, lightTypeLabel);
 
                 if (ImGui::Button("Delete Light")) {
-                    m_EntitySystem.removeLight(m_AssetManager, selectedLight);
+                    m_EntitySystem.removeLight(selectedLight);
                     m_LightNamesOutOfDate = true;
                     selectedLight = -1;
                     lightCount--;
@@ -745,11 +750,6 @@ private:
     }
 
     void updateEntities() {
-        static auto startTime = std::chrono::high_resolution_clock::now();
-
-        auto currentTime = std::chrono::high_resolution_clock::now();
-        float time = std::chrono::duration<float>(currentTime - startTime).count();
-
         glm::vec3 exitPosition = m_EntitySystem.getExitPosition();
         glm::vec3 cameraPosition = m_Camera.getPosition();
 
@@ -758,8 +758,6 @@ private:
             cameraPosition.x < exitPosition.x + 2.0f && cameraPosition.z < cameraPosition.z + 2.0f) {
             m_ParticlesEnabled = true;
         }
-
-        startTime = currentTime;
     }
 
     // TODO remove / replace with other logic
@@ -958,14 +956,14 @@ private:
     }
 
     void loadEntities() {
-        m_EntitySystem.setupWorld(m_AssetManager);
+        m_EntitySystem.setupWorld(m_AssetManager, MAZE_WIDTH, MAZE_HEIGHT);
         auto & minimap = m_EntitySystem.getMinimapDisplay();
         m_MinimapBuffer = m_VulkanResourceService->createVulkanBuffer(
             minimap.size() * sizeof(Particle),
             vk::BufferUsageFlagBits::eVertexBuffer,
             minimap.data()
         );
-        m_MinimapSize = minimap.size();
+        m_MinimapSize = static_cast<uint32_t>(minimap.size());
         m_AssetManager.loadAll();
         m_Camera.setPosition(m_EntitySystem.getStartPosition());
 
@@ -979,13 +977,13 @@ private:
 
         // Initial particles positions on a circle
         // TODO extract pi to somewhere else
-        float pi = 3.14159265358979323846f;
+        const float pi = 3.14159265358979323846f;
         std::vector<Particle> particles(PARTICLE_COUNT);
         for (auto & particle : particles) {
-            float r = 0.25f * std::sqrtf(randomDistribution(randomnessEngine));
-            float theta = randomDistribution(randomnessEngine) * 2.0f * pi;
-            float x = r * std::cosf(theta) * HEIGHT / WIDTH;
-            float y = r * std::sinf(theta);
+            const float r = 0.25f * std::sqrtf(randomDistribution(randomnessEngine));
+            const float theta = randomDistribution(randomnessEngine) * 2.0f * pi;
+            const float x = r * std::cosf(theta) * HEIGHT / WIDTH;
+            const float y = r * std::sinf(theta);
 
             particle.position = glm::vec4(x, y, 1.0f, 1.0f);
             particle.velocity = normalize(glm::vec2(x, y)) * 0.00025f;

@@ -37,10 +37,10 @@ DispatchLoaderHack dispatchLoaderHack;
 #endif
 
 VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
-    vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
+    [[maybe_unused]] vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
     vk::DebugUtilsMessageTypeFlagsEXT type,
     const vk::DebugUtilsMessengerCallbackDataEXT * pCallbackData,
-    void * pUserData
+    [[maybe_unused]] void * pUserData
 ) {
     std::cerr << "validation layer: type " << to_string(type) << " msg: " << pCallbackData->pMessage << std::endl;
 
@@ -428,7 +428,7 @@ private:
     vk::raii::PhysicalDevice m_PhysicalDevice = nullptr;
     vk::raii::Device m_Device = nullptr;
 
-    uint32_t m_QueueIndex = ~0;
+    uint32_t m_QueueIndex = std::numeric_limits<uint32_t>::max();
     vk::raii::Queue m_GraphicsQueue = nullptr;
     vk::raii::CommandPool m_CommandPool = nullptr;
 

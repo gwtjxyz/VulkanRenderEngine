@@ -158,7 +158,7 @@ public:
                 // vertexOffset we can get from attributesToStore
                 // instanceCount and firstInstance we will provide from within the engine - don't need to worry about it here
 
-                size_t oldAttributesSize = attributesToStore.size();
+                uint32_t oldAttributesSize = static_cast<uint32_t>(attributesToStore.size());
                 primitive.vertexOffset = oldAttributesSize;
 
                 if (mp.type != fastgltf::PrimitiveType::Triangles) {
@@ -219,7 +219,7 @@ public:
                 }
 
                 // indices
-                size_t oldIndicesSize = indicesToStore.size();
+                uint32_t oldIndicesSize = static_cast<uint32_t>(indicesToStore.size());
                 // This will throw if there is no index buffer, but that's okay (at least for now)
                 auto & indicesAccessor = asset->accessors[mp.indicesAccessor.value()];
                 indicesToStore.resize(oldIndicesSize + indicesAccessor.count);
@@ -231,9 +231,9 @@ public:
                 );
 
                 primitive.firstIndex = oldIndicesSize;
-                primitive.indexCount = indicesAccessor.count;
+                primitive.indexCount = static_cast<uint32_t>(indicesAccessor.count);
 
-                primitive.materialIndex = mp.materialIndex.value_or(0);
+                primitive.materialIndex = static_cast<uint32_t>(mp.materialIndex.value_or(0));
 
                 mesh.primitives.emplace_back(primitive);
             }
@@ -260,7 +260,7 @@ public:
             node.name = n.name;
             node.localTransform = extractLocalTransform(n);
             if (n.meshIndex.has_value()) {
-                node.meshIndex = n.meshIndex.value();
+                node.meshIndex = static_cast<uint32_t>(n.meshIndex.value());
             } else {
                 node.meshIndex = std::nullopt;
             }
@@ -271,11 +271,11 @@ public:
         // Then, set up root nodes
         fastgltf::Scene gltfScene = asset->scenes.at(0);
         for (auto rootIndices : gltfScene.nodeIndices) {
-            scene.rootIndices.emplace_back(rootIndices);
+            scene.rootIndices.emplace_back(static_cast<uint32_t>(rootIndices));
         }
 
         // Then, populate child/parent relations
-        size_t nodeIndex = 0;
+        uint32_t nodeIndex = 0;
         for (auto & n : asset->nodes) {
             SceneGraphTypes::Node * node = scene.nodeAtIndex(nodeIndex);
             for (auto childIdx : n.children) {
@@ -433,7 +433,7 @@ public:
         SceneGraphTypes::Primitive primitive {};
         primitive.materialIndex = 0;
         primitive.firstIndex = 0;
-        primitive.indexCount = indices.size();
+        primitive.indexCount = static_cast<uint32_t>(indices.size());
 
         // Add one mesh
         SceneGraphTypes::Mesh mesh {};

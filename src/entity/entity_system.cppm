@@ -43,17 +43,15 @@ public:
     }
 
     // Creates all the entities that we will be drawing
-    void setupWorld(AssetManager & assetManager) {
-        uint32_t innerMazeWidth = 10;
-        uint32_t innerMazeHeight = 15;
+    void setupWorld(AssetManager & assetManager, const uint32_t mazeWidth, const uint32_t mazeHeight) {
 
-        m_MazeBuilder.setDimensions(innerMazeWidth, innerMazeHeight);
+        m_MazeBuilder.setDimensions(mazeWidth, mazeHeight);
         m_MazeBuilder.generateMaze();
         m_MazeBuilder.printMazeToFile();
 
         auto walledMaze = m_MazeBuilder.toWalledMaze();
-        uint32_t totalMazeWidth = innerMazeWidth + 2;
-        uint32_t totalMazeHeight = innerMazeHeight + 2;
+        uint32_t totalMazeWidth = mazeWidth + 2;
+        uint32_t totalMazeHeight = mazeHeight + 2;
 
         uint32_t currentMazeX = 0;
         uint32_t currentMazeY = 0;
@@ -149,7 +147,7 @@ public:
         glm::vec3 mazeCenter = { 2.0f * static_cast<float>(totalMazeWidth) / 2, 6.0f, 2.0f * static_cast<float>(totalMazeHeight) / 2 };
         createLight(assetManager, mazeCenter);
 
-        createMinimap(walledMaze, totalMazeWidth, totalMazeHeight);
+        createMinimap(walledMaze, totalMazeWidth);
     }
 
     void createObject(
@@ -214,7 +212,7 @@ public:
         m_LightObjects.emplace_back(std::move(name));
     }
 
-    void removeLight(AssetManager & assetManager, int lightIndex) {
+    void removeLight(const int lightIndex) {
         assert(lightIndex >= 0);
         auto & name = m_LightObjects.at(lightIndex);
         auto entity = m_World.lookup(name.c_str());
@@ -355,8 +353,14 @@ public:
         return m_ExitPosition;
     }
 
-    const flecs::query<const Components::Transform, const Components::Mesh> & getObjectsQuery() const {
-        return m_ObjectsQuery;
+    bool checkForCollisions(const BoundingBox & cameraBoundingBox) const {
+        bool collisionFound = false;
+        m_ObjectsQuery.each([&]([[maybe_unused]] const Components::Transform & t, const Components::Mesh & m) {
+            if (cameraBoundingBox.intersects(m.instance.getBoundingBox())) {
+                collisionFound = true;
+            }
+        });
+        return collisionFound;
     }
 
     const std::vector<Particle> & getMinimapDisplay() const {
@@ -366,7 +370,7 @@ public:
 private:
     void prepareLightSystem() {
         m_LightPrepareSystem = m_World.system<Components::Light, Components::Transform>().each(
-            [this](flecs::iter & it, size_t, Components::Light & l, Components::Transform & t) {
+            [this](Components::Light & l, Components::Transform & t) {
                 auto * deviceMapper = DeviceMapperLocator::locate();
                 // set up indices if they were unset before
                 if (l.index == INDEX_UNSET) {
@@ -403,7 +407,7 @@ private:
 
     void prepareObjectSystem() {
         m_ObjectPrepareSystem = m_World.system<Components::Transform, Components::Mesh>().each(
-            [this](flecs::iter & it, size_t row, Components::Transform & t, Components::Mesh & m) {
+            [this](Components::Transform & t, Components::Mesh & m) {
                 if (!m.instance.getAsset() || !m.instance.isLoaded()) {
                     return;
                 }
@@ -419,7 +423,7 @@ private:
 
     void prepareRenderSystem() {
         m_RenderPrepareSystem = m_World.system<Components::Transform, Components::Mesh>().each(
-            [this](flecs::iter & it, size_t row, Components::Transform & t, Components::Mesh & m) {
+            [this]([[maybe_unused]] Components::Transform & t, Components::Mesh & m) {
                 if (!m.instance.getAsset() || !m.instance.isLoaded()) {
                     return;
                 }
@@ -438,7 +442,7 @@ private:
     // FIXME drawing light cubes broke for some reason
     void prepareLightCubeSystem() {
         m_LightCubeSystem = m_World.system<Components::Transform, Components::Light>().each(
-            [this](flecs::iter & it, size_t row, Components::Transform & t, Components::Light & l) {
+            [this](Components::Transform & t, Components::Light & l) {
                 if (!l.cubeDisplay.isLoaded()) {
                     return;
                 }
@@ -466,7 +470,7 @@ private:
         transformDeviceData.scale = glm::vec4(t.scale, 0.0f);
     }
 
-    void createMinimap(const WalledMaze & walledMaze, const uint32_t totalMazeWidth, const uint32_t totalMazeHeight) {
+    void createMinimap(const WalledMaze & walledMaze, const uint32_t totalMazeWidth) {
         constexpr float ndcStartX = 0.0f;
         constexpr float ndcStartY = -0.6f;
 

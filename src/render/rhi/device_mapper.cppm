@@ -109,7 +109,7 @@ public:
 
         VulkanResourceService * vulkanResourceService = VulkanResourceServiceLocator::locate();
 
-        for (auto i = 0; i < maxFramesInFlight; ++i) {
+        for (uint32_t i = 0; i < maxFramesInFlight; ++i) {
             auto bdaBuffer = vulkanResourceService->createBDABuffer(initialObjectCount * sizeof(T));
             m_GpuBufferGroup.bdaBuffers.emplace_back(bdaBuffer);
         }
@@ -171,7 +171,7 @@ public:
     }
 
     uint32_t getObjectCount() const {
-        return m_CpuBuffer.data.size();
+        return static_cast<uint32_t>(m_CpuBuffer.data.size());
     }
 
     std::vector<bool> & getDirtyStates() {
@@ -201,8 +201,8 @@ private:
         m_CpuBuffer.dirty.resize(newMaxObjectCount, true);
 
         std::vector<VulkanBDABufferData> newBdaBuffers {};
-        const uint32_t maxFramesInFlight = m_GpuBufferGroup.bdaBuffers.size();
-        for (auto i = 0; i < maxFramesInFlight; ++i) {
+        const uint32_t maxFramesInFlight = static_cast<uint32_t>(m_GpuBufferGroup.bdaBuffers.size());
+        for (uint32_t i = 0; i < maxFramesInFlight; ++i) {
             auto newBdaBuffer = vulkanResourceService->createBDABuffer(newMaxObjectCount * sizeof(T));
             vulkanResourceService->copyBuffer(
                 m_GpuBufferGroup.bdaBuffers.at(i).buffer,
@@ -234,7 +234,7 @@ public:
 
         VulkanResourceService * vulkanResourceService = VulkanResourceServiceLocator::locate();
 
-        for (auto i = 0; i < maxFramesInFlight; ++i) {
+        for (uint32_t i = 0; i < maxFramesInFlight; ++i) {
             auto bdaBuffer = vulkanResourceService->createBDABuffer(initialObjectCount * sizeof(BatchLayout));
             m_GpuBuffers.emplace_back(bdaBuffer);
         }
@@ -292,8 +292,8 @@ private:
 
         auto * vulkanResourceService = VulkanResourceServiceLocator::locate();
 
-        const uint32_t maxFramesInFlight = m_GpuBuffers.size();
-        for (auto i = 0; i < maxFramesInFlight; ++i) {
+        const uint32_t maxFramesInFlight = static_cast<uint32_t>(m_GpuBuffers.size());
+        for (uint32_t i = 0; i < maxFramesInFlight; ++i) {
             vulkanResourceService->freeResourcesAndUnmapMemory(m_GpuBuffers.at(i).buffer, m_GpuBuffers.at(i).bufferMemory);
             m_GpuBuffers.at(i) = vulkanResourceService->createBDABuffer(newMaxObjectCount * sizeof(BatchLayout));
 
@@ -531,7 +531,7 @@ private:
 
         // Special case - last element is dirty
         if (startIndex != INDEX_UNSET) {
-            const uint32_t endIndex = dirtyFlags->size();
+            const uint32_t endIndex = static_cast<uint32_t>(dirtyFlags->size());
 
             for (uint32_t frame = 0; frame < m_MaxFramesInFlight; ++frame) {
                 m_CopyCommands.emplace_back(CopyCommand { type, startIndex, endIndex, frame });

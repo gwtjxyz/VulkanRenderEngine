@@ -183,10 +183,18 @@ add_executable(VulkanRenderEngine src/main.cpp ${IMGUI_SOURCES}
         src/misc/vma_usage.cpp
 )
 
+file(GLOB_RECURSE SRC_DIR "src/*.cppm" "src/*.cpp" "src/*.h")
+
+# Enable warnings
+if (MSVC)
+    set_source_files_properties(${SRC_DIR} PROPERTIES COMPILE_FLAGS /W4)
+#    target_compile_options(VulkanRenderEngine PRIVATE /W4)
+endif()
+
 # Compile modules
 target_sources(VulkanRenderEngine PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
-        src/core/platform.cppm src/core/input.cppm src/core/hlsl_compiler.cppm src/core/constants.cppm src/core/bit_flags.cppm src/core/core_types.cppm
+        src/core/platform.cppm src/core/hlsl_compiler.cppm src/core/constants.cppm src/core/bit_flags.cppm src/core/core_types.cppm
         src/entity/entity_system.cppm src/entity/components.cppm
         src/resource/model_parser.cppm src/resource/scene_graph_types.cppm src/resource/asset_manager.cppm src/resource/texture_manager.cppm
         src/resource/maze_builder.cppm
@@ -205,6 +213,10 @@ target_include_directories(VulkanRenderEngine PRIVATE BEFORE ${Vulkan_INCLUDE_DI
 target_include_directories(VulkanRenderEngine PRIVATE AFTER $ENV{VULKAN_SDK}/Include/dxc)
 # VMA
 target_include_directories(VulkanRenderEngine PRIVATE AFTER $ENV{VULKAN_SDK}/Include/vma)
+
+if(MSVC)
+    set_source_files_properties($ENV{VULKAN_SDK}/Include/vma/vk_mem_alloc.h} PROPERTIES COMPILE_FLAGS /W0)
+endif()
 
 target_link_libraries(VulkanRenderEngine PRIVATE
         Vulkan-HppModule glfw glm-module stb::stb tinyobjloader-module ImGui flecs fastgltf_module
@@ -226,36 +238,3 @@ if (MSVC)
             "${CMAKE_CURRENT_BINARY_DIR}/dxcompilerd.dll"
     )
 endif()
-
-# TODO Should this be somewhere else?
-if(MSVC)
-    set(SLANGC_EXECUTABLE "$ENV{VULKAN_SDK}\\Bin\\slangc.exe")
-else() # TODO Linux support
-    set(SLANGC_EXECUTABLE "$ENV{VULKAN_SDK}/bin/slangc")
-endif()
-
-# Slang shader compilation
-function (add_slang_shader_target TARGET)
-    cmake_parse_arguments("SHADER" "" "" "SOURCES" ${ARGN})
-    set(SHADERS_DIR ${CMAKE_CURRENT_LIST_DIR}/shaders)
-    set(ENTRY_POINTS -entry vertMain -entry fragMain)
-    add_custom_command(
-            OUTPUT ${SHADERS_DIR}
-            COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADERS_DIR}
-    )
-    message("SLANGC_EXECUTABLE is ${SLANGC_EXECUTABLE}")
-    message("SHADER_SOURCES is ${SHADER_SOURCES}")
-    add_custom_command(
-            OUTPUT ${SHADERS_DIR}/slang.spv
-            COMMAND ${SLANGC_EXECUTABLE} shader.slang -target spirv -profile spirv_1_4 -emit-spirv-directly -fvk-use-entrypoint-name ${ENTRY_POINTS} -o slang.spv
-            WORKING_DIRECTORY ${SHADERS_DIR}
-            DEPENDS ${SHADERS_DIR} ${SHADER_SOURCES}
-            COMMENT "Compiling Slang Shaders"
-            VERBATIM
-    )
-    add_custom_target (${TARGET} DEPENDS ${SHADERS_DIR}/slang.spv)
-endfunction()
-
-file(GLOB SHADER_SLANG_SOURCES shader.slang)
-add_slang_shader_target(SlangShaders SOURCES ${SHADER_SLANG_SOURCES})
-add_dependencies(VulkanRenderEngine SlangShaders)

@@ -31,8 +31,6 @@ export struct Frustum {
     }
 };
 
-// TODO: third-person camera
-// TODO: switch to quaternions eventually, once I have a UI to debug them
 export class Camera {
 public:
     explicit Camera(
@@ -120,19 +118,11 @@ public:
             return;
         }
 
-        BoundingBox newCameraBB {};
-        newCameraBB.min = m_BoundingBox.min + newPosition;
-        newCameraBB.max = m_BoundingBox.max + newPosition;
+        BoundingBox shiftedCameraBB {};
+        shiftedCameraBB.min = m_BoundingBox.min + newPosition;
+        shiftedCameraBB.max = m_BoundingBox.max + newPosition;
 
-        bool collisionFound = false;
-        auto query = entitySystem.getObjectsQuery();
-        query.each([&](const Components::Transform & t, const Components::Mesh & m) {
-            BoundingBox objectBB = m.instance.getBoundingBox();
-
-            if (newCameraBB.intersects(objectBB)) {
-                collisionFound = true;
-            }
-        });
+        const bool collisionFound = entitySystem.checkForCollisions(shiftedCameraBB);
 
         if (!collisionFound) {
             m_Position = newPosition;

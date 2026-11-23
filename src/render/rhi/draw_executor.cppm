@@ -159,7 +159,7 @@ public:
             constexpr uint32_t indirectStride = sizeof(vk::DrawIndexedIndirectCommand);
             const uint32_t indirectOffset = batchOffset * sizeof(vk::DrawIndexedIndirectCommand);
 
-            const uint32_t drawCount = m_InstanceTransforms.at(batch.transformListIndex).size();
+            const uint32_t drawCount = static_cast<uint32_t>(m_InstanceTransforms.at(batch.transformListIndex).size());
 
             commandBuffer.drawIndexedIndirect(m_GpuBatchBuffer.buffer, indirectOffset, drawCount, indirectStride);
 
