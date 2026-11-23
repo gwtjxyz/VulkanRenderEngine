@@ -122,6 +122,9 @@ private:
         if (key == GLFW_KEY_G && action == GLFW_PRESS) {
             app->m_Camera.toggleGravity();
         }
+        if (key == GLFW_KEY_M && action == GLFW_PRESS) {
+            app->m_DrawMinimap = !app->m_DrawMinimap;
+        }
     }
 
     static void mouseButtonCallback(GLFWwindow * window, int button, int action, int mods) {
@@ -218,6 +221,7 @@ private:
         m_PipelineManager->createComputePipeline();
         m_PipelineManager->createGraphicsPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
         m_PipelineManager->createPointGraphicsPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
+        m_PipelineManager->createMinimapPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
 
         createCommandBuffers();
         createComputeCommandBuffers();
@@ -320,6 +324,8 @@ private:
             m_VulkanResourceService->freeResources(computeDataBuffer.buffer, computeDataBuffer.bufferMemory);
         }
 
+        m_VulkanResourceService->freeResources(m_MinimapBuffer.buffer, m_MinimapBuffer.bufferMemory);
+
         m_DescriptorManager->destroy();
         m_TextureManager->destroyAll();
         m_AssetManager.destroyAll();
@@ -360,7 +366,6 @@ private:
         uint64_t graphicsWaitValue = computeSignalValue;
         uint64_t graphicsSignalValue = ++m_TimelineValue;
 
-        // TODO: should we have code for updating engine state inside a drawing function? Probably not, right?
         updateComputePushConstants();
         updateEntities();
 
@@ -487,7 +492,7 @@ private:
         ImGui::Spacing();
         ImGui::Text("Controls: WASD to move, Space/Control to move up/down");
         ImGui::Text("Esc to show/hide mouse, Q to exit, R to reload shaders");
-        ImGui::Text("G to toggle gravity");
+        ImGui::Text("G to toggle gravity, M to toggle minimap");
         ImGui::Spacing();
 
         if (ImGui::CollapsingHeader("Shader Controls", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -739,13 +744,20 @@ private:
         startTime = currentTime;
     }
 
-    void updateEntities() const {
+    void updateEntities() {
         static auto startTime = std::chrono::high_resolution_clock::now();
 
         auto currentTime = std::chrono::high_resolution_clock::now();
         float time = std::chrono::duration<float>(currentTime - startTime).count();
 
-        // TODO add win condition calculation here maybe?
+        glm::vec3 exitPosition = m_EntitySystem.getExitPosition();
+        glm::vec3 cameraPosition = m_Camera.getPosition();
+
+        // Display compute particle ring upon reaching the exit
+        if (cameraPosition.x > exitPosition.x && cameraPosition.z > exitPosition.z &&
+            cameraPosition.x < exitPosition.x + 2.0f && cameraPosition.z < cameraPosition.z + 2.0f) {
+            m_ParticlesEnabled = true;
+        }
 
         startTime = currentTime;
     }
@@ -947,6 +959,13 @@ private:
 
     void loadEntities() {
         m_EntitySystem.setupWorld(m_AssetManager);
+        auto & minimap = m_EntitySystem.getMinimapDisplay();
+        m_MinimapBuffer = m_VulkanResourceService->createVulkanBuffer(
+            minimap.size() * sizeof(Particle),
+            vk::BufferUsageFlagBits::eVertexBuffer,
+            minimap.data()
+        );
+        m_MinimapSize = minimap.size();
         m_AssetManager.loadAll();
         m_Camera.setPosition(m_EntitySystem.getStartPosition());
 
@@ -1086,12 +1105,6 @@ private:
         m_PipelineManager->prepareAddressesForFrame(m_FrameIndex);
         m_PipelineManager->setParticlesEnabled(m_ParticlesEnabled);
 
-        // Draw particles
-        if (m_ParticlesEnabled) {
-            m_PipelineManager->setAndBindActivePipeline(POINT_GRAPHICS_PIPELINE_NAME);
-            m_PipelineManager->bindAndDraw(m_ComputeDataBuffers[m_FrameIndex].buffer, PARTICLE_COUNT, 1);
-        }
-
         // Common model rendering bindings
         m_PipelineManager->setAndBindActivePipeline(GRAPHICS_PIPELINE_NAME);
         m_PipelineManager->setLightMode(m_LightMode);
@@ -1099,6 +1112,18 @@ private:
 
         // Draw entities
         m_EntitySystem.prepareAndRender(m_FrameIndex, m_DrawLightCubes);
+
+        // Draw minimap
+        if (m_DrawMinimap) {
+            m_PipelineManager->setAndBindActivePipeline(MINIMAP_PIPELINE_NAME);
+            m_PipelineManager->simpleDraw(m_MinimapBuffer.buffer, m_MinimapSize, 1);
+        }
+
+        // Draw particles
+        if (m_ParticlesEnabled) {
+            m_PipelineManager->setAndBindActivePipeline(POINT_GRAPHICS_PIPELINE_NAME);
+            m_PipelineManager->bindAndDraw(m_ComputeDataBuffers[m_FrameIndex].buffer, PARTICLE_COUNT, 1);
+        }
 
         // Draw ImGui
         ImGui::Render();
@@ -1190,6 +1215,7 @@ private:
         m_PipelineManager->createComputePipeline();
         m_PipelineManager->createGraphicsPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
         m_PipelineManager->createPointGraphicsPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
+        m_PipelineManager->createMinimapPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
 
         cleanupColorResources();
         createColorResources();
@@ -1201,11 +1227,13 @@ private:
         m_Instance.getDevice().waitIdle();
 
         m_PipelineManager->destroyAll();
+        m_DrawExecutor->destroy();
 
         m_DrawExecutor->initialize();
         m_PipelineManager->createComputePipeline();
         m_PipelineManager->createGraphicsPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
         m_PipelineManager->createPointGraphicsPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
+        m_PipelineManager->createMinimapPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
 
         m_ShadersSetToReload = false;
     }
@@ -1236,6 +1264,7 @@ private:
     bool m_ShouldCursorBeVisible = false;
     bool m_CanUiFocusBeToggled = false;     // Seems janky, should probably move to a more robust input state handling method later
     bool m_DrawLightCubes = false;
+    bool m_DrawMinimap = false;
 
     std::vector<const char *> m_LightNames {};
     bool m_LightNamesOutOfDate = true;
@@ -1266,6 +1295,9 @@ private:
 
     std::vector<VulkanComputeBufferData> m_ComputeDataBuffers {};
     ComputePushConstants m_ComputePushConstants {};
+
+    uint32_t m_MinimapSize = 0;
+    VulkanBufferData m_MinimapBuffer {};
 
     vk::Image m_DepthImage = nullptr;
     vk::DeviceMemory m_DepthImageMemory = nullptr;

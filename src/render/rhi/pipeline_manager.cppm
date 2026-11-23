@@ -375,6 +375,126 @@ public:
         m_PipelineMap.insert({ POINT_GRAPHICS_PIPELINE_NAME, std::move(newPipeline) });
     }
 
+    void createMinimapPipeline(vk::SampleCountFlagBits msaaSamples, vk::SurfaceFormatKHR swapChainSurfaceFormat) {
+        auto [vsShaderModule, vsShaderStageInfo] = m_ShaderCompiler.compileWithInfo(
+            m_Instance->getRaiiDevice(),
+            "shaders/minimap_shader.hlsl",
+            HlslShaderStage::VERTEX
+        );
+        auto [psShaderModule, psShaderStageInfo] = m_ShaderCompiler.compileWithInfo(
+            m_Instance->getRaiiDevice(),
+            "shaders/minimap_shader.hlsl",
+            HlslShaderStage::PIXEL
+        );
+
+        auto bindingDescription = Particle::getBindingDescription();
+        auto attributeDescriptions = Particle::getAttributeDescriptions();
+
+        vk::PipelineVertexInputStateCreateInfo vertexInputInfo {
+            .vertexBindingDescriptionCount = 1,
+            .pVertexBindingDescriptions = &bindingDescription,
+            .vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size()),
+            .pVertexAttributeDescriptions = attributeDescriptions.data()
+        };
+
+        vk::PipelineShaderStageCreateInfo shaderStages[] = { vsShaderStageInfo, psShaderStageInfo };
+
+        vk::PipelineInputAssemblyStateCreateInfo inputAssembly { .topology = vk::PrimitiveTopology::ePointList };
+
+        std::vector<vk::DynamicState> dynamicStates = {
+            vk::DynamicState::eViewport,
+            vk::DynamicState::eScissor
+        };
+        vk::PipelineDynamicStateCreateInfo dynamicState {
+            .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()),
+            .pDynamicStates = dynamicStates.data()
+        };
+        vk::PipelineViewportStateCreateInfo viewportState { .viewportCount = 1, .scissorCount = 1 };
+
+        vk::PipelineRasterizationStateCreateInfo rasterizer {
+            .depthClampEnable = vk::False,
+            .rasterizerDiscardEnable = vk::False,
+            .polygonMode = vk::PolygonMode::eFill,
+            .cullMode = vk::CullModeFlagBits::eBack,
+            .frontFace = vk::FrontFace::eCounterClockwise,
+            .depthBiasEnable = vk::False,
+            .lineWidth = 1.0f
+        };
+
+        vk::PipelineMultisampleStateCreateInfo multisampling {
+            .rasterizationSamples = msaaSamples,
+            .sampleShadingEnable = vk::False
+        };
+
+        vk::PipelineDepthStencilStateCreateInfo depthStencil {
+            .depthTestEnable = vk::False,
+            .depthWriteEnable = vk::True,
+            .depthCompareOp = vk::CompareOp::eLess,
+            .depthBoundsTestEnable = vk::False,
+            .stencilTestEnable = vk::False
+        };
+
+        vk::PipelineColorBlendAttachmentState colorBlendAttachment {
+            .blendEnable = vk::True,
+            .srcColorBlendFactor = vk::BlendFactor::eSrcAlpha,
+            .dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha,
+            .colorBlendOp = vk::BlendOp::eAdd,
+            .srcAlphaBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha,
+            .dstAlphaBlendFactor = vk::BlendFactor::eZero,
+            .alphaBlendOp = vk::BlendOp::eAdd,
+            .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA
+        };
+
+        vk::PipelineColorBlendStateCreateInfo colorBlending {
+            .logicOpEnable = vk::False,
+            .logicOp = vk::LogicOp::eCopy,
+            .attachmentCount = 1,
+            .pAttachments = &colorBlendAttachment
+        };
+
+        vk::PipelineLayoutCreateInfo pipelineLayoutInfo {
+            .setLayoutCount = 0,                                    // # of descriptor set layouts
+            .pSetLayouts = nullptr,                                 // Pointer to descriptor set layouts
+            .pushConstantRangeCount = 0,                            // # of push constant ranges
+        };
+        auto minimapPipelineLayout = vk::raii::PipelineLayout(m_Instance->getRaiiDevice(), pipelineLayoutInfo);
+
+        auto * vulkanResourceService = VulkanResourceServiceLocator::locate();
+
+        vk::Format depthFormat = vulkanResourceService->findDepthFormat();
+        vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo {
+            .colorAttachmentCount = 1,
+            .pColorAttachmentFormats = &swapChainSurfaceFormat.format,
+            .depthAttachmentFormat = depthFormat
+        };
+
+        vk::GraphicsPipelineCreateInfo pipelineInfo {
+            .pNext = &pipelineRenderingCreateInfo,
+            .stageCount = 2,
+            .pStages = shaderStages,
+            .pVertexInputState = &vertexInputInfo,
+            .pInputAssemblyState = &inputAssembly,
+            .pViewportState = &viewportState,
+            .pRasterizationState = &rasterizer,
+            .pMultisampleState = &multisampling,
+            .pDepthStencilState = &depthStencil,
+            .pColorBlendState = &colorBlending,
+            .pDynamicState = &dynamicState,
+            .layout = minimapPipelineLayout,
+            .renderPass = nullptr                   // we're using dynamic rendering instead of render passes
+        };
+
+        auto minimapPipeline = vk::raii::Pipeline(m_Instance->getRaiiDevice(), nullptr, pipelineInfo);
+
+        Pipeline newPipeline {
+            .pipeline = std::move(minimapPipeline),
+            .layout = std::move(minimapPipelineLayout),
+            .bindPoint = vk::PipelineBindPoint::eGraphics,
+        };
+
+        m_PipelineMap.insert({ MINIMAP_PIPELINE_NAME, std::move(newPipeline) });
+    }
+
     void setAndBindActivePipeline(const std::string & pipelineName) {
         m_ActivePipeline = &m_PipelineMap.at(pipelineName);
 
@@ -455,6 +575,11 @@ public:
     void bindAndDraw(const vk::Buffer vertexBuffer, uint32_t vertexCount, const uint32_t instanceCount) const {
         bindVertexPushConstants();
 
+        m_ActiveCommandBuffer.bindVertexBuffers(0, vertexBuffer, { 0 });
+        m_ActiveCommandBuffer.draw(vertexCount, instanceCount, 0, 0);
+    }
+
+    void simpleDraw(const vk::Buffer vertexBuffer, uint32_t vertexCount, const uint32_t instanceCount) const {
         m_ActiveCommandBuffer.bindVertexBuffers(0, vertexBuffer, { 0 });
         m_ActiveCommandBuffer.draw(vertexCount, instanceCount, 0, 0);
     }

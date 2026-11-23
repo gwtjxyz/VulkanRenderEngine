@@ -48,3 +48,4 @@ export const std::string LIGHT_ENTITY_NAME = "light_";
 export const std::string GRAPHICS_PIPELINE_NAME = "graphics";
 export const std::string POINT_GRAPHICS_PIPELINE_NAME = "point_graphics";
 export const std::string COMPUTE_PIPELINE_NAME = "compute";
+export const std::string MINIMAP_PIPELINE_NAME = "minimap";

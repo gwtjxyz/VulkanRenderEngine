@@ -44,8 +44,8 @@ public:
 
     // Creates all the entities that we will be drawing
     void setupWorld(AssetManager & assetManager) {
-        uint32_t innerMazeWidth = 30;
-        uint32_t innerMazeHeight = 30;
+        uint32_t innerMazeWidth = 10;
+        uint32_t innerMazeHeight = 15;
 
         m_MazeBuilder.setDimensions(innerMazeWidth, innerMazeHeight);
         m_MazeBuilder.generateMaze();
@@ -53,6 +53,7 @@ public:
 
         auto walledMaze = m_MazeBuilder.toWalledMaze();
         uint32_t totalMazeWidth = innerMazeWidth + 2;
+        uint32_t totalMazeHeight = innerMazeHeight + 2;
 
         uint32_t currentMazeX = 0;
         uint32_t currentMazeY = 0;
@@ -145,7 +146,10 @@ public:
             cellIndex++;
         }
 
-        createLight(assetManager, { 0.0f, -1.0f, 10.0f });
+        glm::vec3 mazeCenter = { 2.0f * static_cast<float>(totalMazeWidth) / 2, 6.0f, 2.0f * static_cast<float>(totalMazeHeight) / 2 };
+        createLight(assetManager, mazeCenter);
+
+        createMinimap(walledMaze, totalMazeWidth, totalMazeHeight);
     }
 
     void createObject(
@@ -355,6 +359,10 @@ public:
         return m_ObjectsQuery;
     }
 
+    const std::vector<Particle> & getMinimapDisplay() const {
+        return m_MinimapDisplay;
+    }
+
 private:
     void prepareLightSystem() {
         m_LightPrepareSystem = m_World.system<Components::Light, Components::Transform>().each(
@@ -458,6 +466,45 @@ private:
         transformDeviceData.scale = glm::vec4(t.scale, 0.0f);
     }
 
+    void createMinimap(const WalledMaze & walledMaze, const uint32_t totalMazeWidth, const uint32_t totalMazeHeight) {
+        constexpr float ndcStartX = 0.0f;
+        constexpr float ndcStartY = -0.6f;
+
+        constexpr float mapCellSize = 0.02f;
+
+        uint32_t currentMazeX = 0;
+        uint32_t currentMazeY = 0;
+        uint32_t index = 0;
+        for (const auto c : walledMaze.grid) {
+            Particle p {};
+
+            if (index == walledMaze.entrance) {
+                p.color = {0.0f, 1.0f, 0.0f, 1.0f};
+            } else if (index == walledMaze.exit) {
+                p.color = {1.0f, 0.0f, 0.0f, 1.0f};
+            } else if (c.type == MazeCellType::Corridor) {
+                p.color = {0.1f, 0.6f, 0.1f, 1.0f};
+            } else {
+                p.color = {0.2f, 0.2f, 0.2f, 1.0f};
+            }
+
+            p.position.x = ndcStartX + mapCellSize * currentMazeX;
+            p.position.y = ndcStartY + mapCellSize * currentMazeY;
+            p.position.z = 1.0f;
+            p.position.w = 1.0f;
+
+            m_MinimapDisplay.emplace_back(p);
+
+            currentMazeX++;
+            if (currentMazeX == totalMazeWidth) {
+                currentMazeY++;
+                currentMazeX = 0;
+            }
+
+            index++;
+        }
+    }
+
 private:
     flecs::world m_World {};
 
@@ -484,4 +531,6 @@ private:
 
     glm::vec3 m_StartPosition {};
     glm::vec3 m_ExitPosition {};
+
+    std::vector<Particle> m_MinimapDisplay {};
 };
