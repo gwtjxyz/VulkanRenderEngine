@@ -197,7 +197,6 @@ public:
 private:
     // TODO use this somewhere else probably, or for interpolation
     // don't really need this for camera but I'll keep it as reference
-    // maybe I'll use it in updateCameraVectors() later once I can verify the "easier" method works
     [[nodiscard]] glm::quat quatFromAngles() const {
         glm::quat result{};
         // from https://gamemath.com/book/orient.html#euler_angles_to_quaternion
@@ -243,8 +242,8 @@ private:
     glm::vec3 m_Right{}; // Camera's local right direction (perpendicular to front and up)
     glm::vec3 m_WorldUp{}; // Global up vector reference (typically Y-axis)
 
-    glm::vec3 m_LockedFront {};
-    glm::vec3 m_LockedRight {};
+    glm::vec3 m_LockedFront {};     // Camera front if we ignore the Y look axis
+    glm::vec3 m_LockedRight {};     // Camera right if we ignore the Y look axis
 
     // in degrees
     struct Spin {

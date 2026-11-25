@@ -44,7 +44,6 @@ public:
 
     // Creates all the entities that we will be drawing
     void setupWorld(AssetManager & assetManager, const uint32_t mazeWidth, const uint32_t mazeHeight) {
-
         m_MazeBuilder.setDimensions(mazeWidth, mazeHeight);
         m_MazeBuilder.generateMaze();
         m_MazeBuilder.printMazeToFile();
@@ -144,8 +143,13 @@ public:
             cellIndex++;
         }
 
-        glm::vec3 mazeCenter = { 2.0f * static_cast<float>(totalMazeWidth) / 2, 6.0f, 2.0f * static_cast<float>(totalMazeHeight) / 2 };
-        createLight(assetManager, mazeCenter);
+        glm::vec3 mazeCenter = { 2.0f * static_cast<float>(totalMazeWidth) / 2.0f, 6.0f, 2.0f * static_cast<float>(totalMazeHeight) / 2.0f };
+        glm::vec4 overheadLightColor = { 1.0f, 1.0f, 1.0f, 1.0f };  // White
+        glm::vec4 startLightColor = { 0.0f, 1.0f, 0.0f, 0.5f };     // Green
+        glm::vec4 exitLightColor = { 1.0f, 0.0f, 0.0f, 0.5f };    // Red
+        createLight(assetManager, overheadLightColor, mazeCenter);
+        createLight(assetManager, startLightColor, {m_StartPosition.x, 1.0f, m_StartPosition.z});
+        createLight(assetManager, exitLightColor, {m_ExitPosition.x, 1.0f, m_ExitPosition.z});
 
         createMinimap(walledMaze, totalMazeWidth);
     }
@@ -178,6 +182,7 @@ public:
 
     void createLight(
         AssetManager & assetManager,
+        const glm::vec4 & color = { 1.0f, 1.0f, 1.0f, 1.0f },
         const glm::vec3 & position = { 0.0f, 0.0f, 0.0f },
         const glm::vec3 & rotation = { 0.0f, 0.0f, 0.0f }
     ) {
@@ -206,6 +211,10 @@ public:
         }
 
         auto & light = entity.get_mut<Components::Light>();
+        light.color.x = color.x;
+        light.color.y = color.y;
+        light.color.z = color.z;
+        light.intensity = color.w;
         light.cubeDisplay = AssetInstance(cubeAssetHandle);
         light.cubeDisplay.load();
 
@@ -355,11 +364,13 @@ public:
 
     bool checkForCollisions(const BoundingBox & cameraBoundingBox) const {
         bool collisionFound = false;
-        m_ObjectsQuery.each([&]([[maybe_unused]] const Components::Transform & t, const Components::Mesh & m) {
-            if (cameraBoundingBox.intersects(m.instance.getBoundingBox())) {
-                collisionFound = true;
+        m_ObjectsQuery.each(
+            [&]([[maybe_unused]] const Components::Transform & t, const Components::Mesh & m) {
+                if (cameraBoundingBox.intersects(m.instance.getBoundingBox())) {
+                    collisionFound = true;
+                }
             }
-        });
+        );
         return collisionFound;
     }
 
@@ -483,13 +494,13 @@ private:
             Particle p {};
 
             if (index == walledMaze.entrance) {
-                p.color = {0.0f, 1.0f, 0.0f, 1.0f};
+                p.color = { 0.0f, 1.0f, 0.0f, 1.0f };
             } else if (index == walledMaze.exit) {
-                p.color = {1.0f, 0.0f, 0.0f, 1.0f};
+                p.color = { 1.0f, 0.0f, 0.0f, 1.0f };
             } else if (c.type == MazeCellType::Corridor) {
-                p.color = {0.1f, 0.6f, 0.1f, 1.0f};
+                p.color = { 0.1f, 0.6f, 0.1f, 1.0f };
             } else {
-                p.color = {0.2f, 0.2f, 0.2f, 1.0f};
+                p.color = { 0.2f, 0.2f, 0.2f, 1.0f };
             }
 
             p.position.x = ndcStartX + mapCellSize * currentMazeX;
@@ -526,9 +537,7 @@ private:
     // TODO change - temporary solution, not very clean
     flecs::system m_LightCubeSystem;
 
-    // TODO change to vector of strings so we can add arbitrary objects at runtime
     std::vector<std::string> m_WorldObjects {};
-
     std::vector<std::string> m_LightObjects {};
 
     uint32_t m_CreatedLights = 0;

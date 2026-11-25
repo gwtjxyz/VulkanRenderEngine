@@ -32,21 +32,6 @@ struct BatchLayout {
     uint instanceTransformIndex;
 };
 
-/** vk::BufferPointer class:
-    (from https://github.com/microsoft/hlsl-specs/blob/main/proposals/0010-vk-buffer-ref.md)
-
-    template <struct S, int align>
-    class vk::BufferPointer {
-        vk::BufferPointer(const vk::BufferPointer&);
-        vk::BufferPointer& operator=(const vk::BufferPointer&);
-        vk::BufferPointer(const uint64_t);
-        S& Get() const;
-        operator uint64_t() const;
-    }
-
-    can do this later maybe?
-*/
-
 // NOTE: Order of variables here has to be the exact same as on CPU side!
 struct VertexPushConstants {
     float4 cameraPos;

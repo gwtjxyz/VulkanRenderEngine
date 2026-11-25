@@ -52,7 +52,7 @@ constexpr bool enableValidationLayers = false;
 constexpr bool enableValidationLayers = true;
 #endif // NDEBUG
 
-constexpr int MAX_FRAMES_IN_FLIGHT = 2;
+constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
 
 static void checkVkResult(VkResult err) {
     if (err == 0)
@@ -63,7 +63,6 @@ static void checkVkResult(VkResult err) {
         std::abort();
 }
 
-// Upper layer of the renderer, performs rendering and interfaces with the resource manager
 export class RenderEngine {
 public:
     void run(const std::string & appName) {
@@ -127,7 +126,7 @@ private:
         }
     }
 
-    static void mouseButtonCallback(GLFWwindow * window, int button, int action, int mods) {
+    static void mouseButtonCallback(GLFWwindow * window, int button, int action, [[maybe_unused]] int mods) {
         ImGuiIO & io = ImGui::GetIO();
         if (io.WantCaptureMouse == false && button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
             auto app = static_cast<RenderEngine *>(glfwGetWindowUserPointer(window));
@@ -173,12 +172,12 @@ private:
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
             return;
         }
-        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
         app->m_Camera.processMouseMovement(xOffset, yOffset);
     }
 
-    static void scrollCallback(GLFWwindow * window, double [[maybe_unused]] xOffset, double yOffset) {
+    static void scrollCallback(GLFWwindow * window, [[maybe_unused]] double xOffset, double yOffset) {
         ImGuiIO & io = ImGui::GetIO();
         if (io.WantCaptureMouse) {
             return;
@@ -206,7 +205,7 @@ private:
         // Pipeline draw data
         m_DeviceMapper->preallocateBuffers(100, MAX_FRAMES_IN_FLIGHT);
 
-        // Descriptor set layout
+        // Descriptors
         m_DescriptorManager->setVulkanInstance(&m_Instance);
         m_DescriptorManager->initialize();
 
@@ -223,16 +222,15 @@ private:
         m_PipelineManager->createPointGraphicsPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
         m_PipelineManager->createMinimapPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
 
+        // Command buffers
         createCommandBuffers();
-        createComputeCommandBuffers();
-
-        createComputeBuffers();
+        // Particle data
+        initComputeParticleBuffers();
 
         // Image resources to draw into
-        createColorResources();
-        createDepthResources();
+        createImageResources();
 
-        // Sync objects for drawing
+        // Synchronization setup
         createSyncObjects();
     }
 
@@ -248,11 +246,14 @@ private:
             advanceDeltaTime();
 
             glfwPollEvents();
-            processInput(m_Window, m_Camera, m_DeltaTime);
+            processContinuousInput(m_Window, m_Camera, m_DeltaTime);
 
             if (m_ShadersSetToReload) {
                 recompileShadersAndRecreatePipeline();
             }
+
+            updateEntities();
+
             drawFrame();
 
             auto timeAtFrameEnd = std::chrono::high_resolution_clock::now();
@@ -279,8 +280,8 @@ private:
         return io.WantCaptureMouse;
     }
 
-    // For continuously inputting keys; for them only being pressed once, we keep the callback
-    void processInput(GLFWwindow * window, Camera & camera, const float deltaTime) {
+    // For continuously inputting keys; for keys only being pressed once, we keep the callback
+    void processContinuousInput(GLFWwindow * window, Camera & camera, const float deltaTime) {
         if (isImguiCapturingKeyboard())
             return;
 
@@ -317,8 +318,7 @@ private:
     void cleanup() {
         cleanupSwapChain();
 
-        cleanupDepthResources();
-        cleanupColorResources();
+        cleanupImageResources();
 
         for (auto & computeDataBuffer : m_ComputeDataBuffers) {
             m_VulkanResourceService->freeResources(computeDataBuffer.buffer, computeDataBuffer.bufferMemory);
@@ -343,12 +343,10 @@ private:
     }
 
     void drawFrame() {
-        // Start the ImGui frame
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        // Draw our custom UI widget
         drawUI();
 
         auto [result, imageIndex] = m_SwapChain.acquireNextImage(UINT64_MAX, nullptr, *m_InFlightFences[m_FrameIndex]);
@@ -357,7 +355,6 @@ private:
             throw std::runtime_error("Failed to wait for fence!");
         }
 
-        // Only reset the fence if we are submitting work
         m_Instance.getDevice().resetFences(*m_InFlightFences[m_FrameIndex]);
 
         // Update timeline value for this frame
@@ -366,15 +363,13 @@ private:
         uint64_t graphicsWaitValue = computeSignalValue;
         uint64_t graphicsSignalValue = ++m_TimelineValue;
 
-        updateComputePushConstants();
-        updateEntities();
-
         // Compute
         {
+            updateComputePushConstants();
             // Need to record and submit work even if we're not actually displaying anything
             // to signal timeline semaphores, otherwise subsequent stages will wait forever
             recordComputeCommandBuffer();
-            // Submit compute work
+
             vk::TimelineSemaphoreSubmitInfo computeTimelineInfo = {
                 .waitSemaphoreValueCount = 1,
                 .pWaitSemaphoreValues = &computeWaitValue,
@@ -401,7 +396,7 @@ private:
 
         // Graphics
         {
-            recordCommandBuffer(imageIndex);
+            recordGraphicsCommandBuffer(imageIndex);
 
             // Submit graphics work (wait for compute to finish)
             vk::PipelineStageFlags waitDestinationStageMask(vk::PipelineStageFlagBits::eVertexInput);
@@ -419,7 +414,7 @@ private:
                 .pWaitSemaphores = &*m_Semaphore,
                 .pWaitDstStageMask = &waitDestinationStageMask,
                 .commandBufferCount = 1,
-                .pCommandBuffers = &*m_CommandBuffers[m_FrameIndex],
+                .pCommandBuffers = &*m_GraphicsCommandBuffers[m_FrameIndex],
                 .signalSemaphoreCount = 1,
                 .pSignalSemaphores = &*m_Semaphore
             };
@@ -459,7 +454,7 @@ private:
             }
         }
 
-
+        // Advance frame index
         m_FrameIndex = (m_FrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
@@ -599,8 +594,6 @@ private:
             }
         }
 
-        // TODO use tabs
-
         if (ImGui::CollapsingHeader("Light Controls (WIP)", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::Spacing();
             static int selectedLight = -1;
@@ -631,7 +624,7 @@ private:
                 m_LightNamesOutOfDate = false;
             }
 
-            ImGui::Combo("Light", &selectedLight, m_LightNames.data(), m_LightNames.size());
+            ImGui::Combo("Light", &selectedLight, m_LightNames.data(), static_cast<int>(m_LightNames.size()));
             if (selectedLight != -1) {
                 // Light properties
 
@@ -705,7 +698,7 @@ private:
                 ImGui::ColorEdit4("Light Color", lightColor);
 
                 const char * lightTypeLabel;
-                switch (auto lightTypeEnum = static_cast<Components::LightType>(lightType)) {
+                switch (static_cast<Components::LightType>(lightType)) {
                     case Components::LightType::Directional:
                         lightTypeLabel = "Directional";
                         break;
@@ -720,7 +713,10 @@ private:
                         break;
                 }
 
+                // TODO enabled once we support more light types
+                ImGui::BeginDisabled();
                 ImGui::SliderInt("Light Type", &lightType, 0, 2, lightTypeLabel);
+                ImGui::EndDisabled();
 
                 if (ImGui::Button("Delete Light")) {
                     m_EntitySystem.removeLight(selectedLight);
@@ -729,15 +725,16 @@ private:
                     lightCount--;
                 }
 
-                ImGui::PopItemWidth();
             }
         }
+
+        ImGui::PopItemWidth();
 
         ImGui::End();
     }
 
     // TODO probably extract to somewhere
-    static bool isDifferentEnough(const float a, const float b, const float tolerance) {
+    inline static bool isDifferentEnough(const float a, const float b, const float tolerance) {
         return std::fabsf(a - b) >= tolerance;
     }
 
@@ -760,7 +757,6 @@ private:
         }
     }
 
-    // TODO remove / replace with other logic
     void updateComputePushConstants() {
         m_ComputePushConstants.addressThisFrame = m_ComputeDataBuffers[m_FrameIndex].bufferDeviceAddress;
         if (m_FrameIndex > 0) {
@@ -791,11 +787,11 @@ private:
     }
 
     void createSwapChain() {
-        auto physicalDevice = m_Instance.getPhysicalDevice();
-        auto surface = m_Instance.getSurface();
-        vk::SurfaceCapabilitiesKHR surfaceCapabilities = physicalDevice.getSurfaceCapabilitiesKHR(surface);
+        const auto physicalDevice = m_Instance.getPhysicalDevice();
+        const auto surface = m_Instance.getSurface();
+        const vk::SurfaceCapabilitiesKHR surfaceCapabilities = physicalDevice.getSurfaceCapabilitiesKHR(surface);
         m_SwapChainExtent = chooseSwapExtent(surfaceCapabilities);
-        uint32_t minImageCount = chooseSwapMinImageCount(surfaceCapabilities);
+        const uint32_t minImageCount = chooseSwapMinImageCount(surfaceCapabilities);
 
         std::vector<vk::SurfaceFormatKHR> availableFormats = physicalDevice.getSurfaceFormatsKHR(surface);
         m_SwapChainSurfaceFormat = chooseSwapSurfaceFormat(availableFormats);
@@ -809,7 +805,7 @@ private:
             .imageColorSpace = m_SwapChainSurfaceFormat.colorSpace,
             .imageExtent = m_SwapChainExtent,
             .imageArrayLayers = 1,                                          // always 1 unless developing stereoscopic 3D app
-            .imageUsage = vk::ImageUsageFlagBits::eColorAttachment,      // rendering directly to swap chain images; can use eTransferDst if we want to do post-processing first
+            .imageUsage = vk::ImageUsageFlagBits::eColorAttachment,         // rendering directly to swap chain images; can use eTransferDst if we want to do post-processing first
             .imageSharingMode = vk::SharingMode::eExclusive,
             .preTransform = surfaceCapabilities.currentTransform,
             .compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque,
@@ -821,7 +817,6 @@ private:
         m_SwapChainImages = m_SwapChain.getImages();
 
         assert(m_SwapChainImageViews.empty());
-        // vk::ImageAspectFlags swapchainFlags = vk::ImageAspectFlagBits::eColor;
 
         for (auto & image : m_SwapChainImages) {
             m_SwapChainImageViews.emplace_back(
@@ -936,16 +931,14 @@ private:
         ImGui_ImplVulkan_Init(&initInfo);
     }
 
-    void createColorResources() {
+    void createImageResources() {
         VulkanImageData colorResources = m_VulkanResourceService->createColorResources(
             m_SwapChainSurfaceFormat.format, m_SwapChainExtent, m_MsaaSamples
         );
         m_ColorImage = colorResources.image;
         m_ColorImageMemory = colorResources.imageMemory;
         m_ColorImageView = colorResources.imageView;
-    }
 
-    void createDepthResources() {
         vk::Format depthFormat = m_VulkanResourceService->findDepthFormat();
         VulkanImageData depthResources = m_VulkanResourceService->createDepthResources(
             depthFormat, m_SwapChainExtent, m_MsaaSamples
@@ -970,7 +963,7 @@ private:
         m_DescriptorManager->writeToDescriptors();
     }
 
-    void createComputeBuffers() {
+    void initComputeParticleBuffers() {
         // Initialize particles
         std::default_random_engine randomnessEngine(static_cast<unsigned>(std::time(nullptr)));
         std::uniform_real_distribution<float> randomDistribution(0.0f, 1.0f);
@@ -999,27 +992,31 @@ private:
     }
 
     void createCommandBuffers() {
-        vk::CommandBufferAllocateInfo allocInfo {
-            .commandPool = m_Instance.getCommandPool(),
-            .level = vk::CommandBufferLevel::ePrimary,
-            .commandBufferCount = MAX_FRAMES_IN_FLIGHT
-        };
+        // Compute
+        {
+            vk::CommandBufferAllocateInfo allocInfo {
+                .commandPool = m_Instance.getCommandPool(),
+                .level = vk::CommandBufferLevel::ePrimary,
+                .commandBufferCount = MAX_FRAMES_IN_FLIGHT
+            };
 
-        m_CommandBuffers = vk::raii::CommandBuffers(m_Instance.getRaiiDevice(), allocInfo);
+            m_GraphicsCommandBuffers = vk::raii::CommandBuffers(m_Instance.getRaiiDevice(), allocInfo);
+        }
+
+        // Graphics
+        {
+            vk::CommandBufferAllocateInfo allocInfo = {
+                .commandPool = m_Instance.getCommandPool(),
+                .level = vk::CommandBufferLevel::ePrimary,
+                .commandBufferCount = MAX_FRAMES_IN_FLIGHT
+            };
+
+            m_ComputeCommandBuffers = vk::raii::CommandBuffers(m_Instance.getRaiiDevice(), allocInfo);
+        }
     }
 
-    void createComputeCommandBuffers() {
-        vk::CommandBufferAllocateInfo allocInfo = {
-            .commandPool = m_Instance.getCommandPool(),
-            .level = vk::CommandBufferLevel::ePrimary,
-            .commandBufferCount = MAX_FRAMES_IN_FLIGHT
-        };
-
-        m_ComputeCommandBuffers = vk::raii::CommandBuffers(m_Instance.getRaiiDevice(), allocInfo);
-    }
-
-    void recordCommandBuffer(const uint32_t imageIndex) const {
-        auto & commandBuffer = m_CommandBuffers[m_FrameIndex];
+    void recordGraphicsCommandBuffer(const uint32_t imageIndex) const {
+        auto & commandBuffer = m_GraphicsCommandBuffers[m_FrameIndex];
         commandBuffer.reset();
         commandBuffer.begin({});
 
@@ -1097,13 +1094,12 @@ private:
 
         commandBuffer.beginRendering(renderingInfo);
 
-        // Set camera's projection matrix for rendering
+        // Set various push constants
         m_PipelineManager->setCameraVariables(m_Camera.getPosition(), m_Camera.getProjectionMatrix(), m_Camera.getViewMatrix());
-        // Set buffer device addresses
         m_PipelineManager->prepareAddressesForFrame(m_FrameIndex);
         m_PipelineManager->setParticlesEnabled(m_ParticlesEnabled);
 
-        // Common model rendering bindings
+        // Common object rendering bindings
         m_PipelineManager->setAndBindActivePipeline(GRAPHICS_PIPELINE_NAME);
         m_PipelineManager->setLightMode(m_LightMode);
         m_PipelineManager->setLightCount(m_DeviceMapper->getLightCount());
@@ -1125,7 +1121,7 @@ private:
 
         // Draw ImGui
         ImGui::Render();
-        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), *m_CommandBuffers[m_FrameIndex]);
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), *m_GraphicsCommandBuffers[m_FrameIndex]);
         commandBuffer.endRendering();
 
         // After rendering, transition the swapchain image to PRESENT_SRC
@@ -1180,11 +1176,8 @@ private:
         m_SwapChain = nullptr; // doing this automatically calls the destructor which in turn calls swapChain.clear()
     }
 
-    void cleanupColorResources() {
+    void cleanupImageResources() {
         m_VulkanResourceService->freeResources(m_ColorImage, m_ColorImageMemory, m_ColorImageView);
-    }
-
-    void cleanupDepthResources() {
         m_VulkanResourceService->freeResources(m_DepthImage, m_DepthImageMemory, m_DepthImageView);
     }
 
@@ -1215,10 +1208,8 @@ private:
         m_PipelineManager->createPointGraphicsPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
         m_PipelineManager->createMinimapPipeline(m_MsaaSamples, m_SwapChainSurfaceFormat);
 
-        cleanupColorResources();
-        createColorResources();
-        cleanupDepthResources();
-        createDepthResources();
+        cleanupImageResources();
+        createImageResources();
     }
 
     void recompileShadersAndRecreatePipeline() {
@@ -1283,7 +1274,7 @@ private:
 
     bool m_ShadersSetToReload = false;
 
-    std::vector<vk::raii::CommandBuffer> m_CommandBuffers {};
+    std::vector<vk::raii::CommandBuffer> m_GraphicsCommandBuffers {};
     std::vector<vk::raii::CommandBuffer> m_ComputeCommandBuffers {};
 
     vk::raii::Semaphore m_Semaphore = nullptr;

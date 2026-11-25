@@ -25,7 +25,8 @@ const std::string PROJECT_DIR = "VulkanRenderEngine"; // TODO un-hardcode?
 
 export std::filesystem::path pathFromProjectDir(const std::string & relativePath) {
     auto currentPath = std::filesystem::current_path();
-    while (currentPath.filename() != std::filesystem::path(PROJECT_DIR)) {
+    const auto projectDirPath = std::filesystem::path(PROJECT_DIR);
+    while (currentPath.filename() != projectDirPath) {
         assert(currentPath != currentPath.parent_path());
         currentPath = currentPath.parent_path();
     }

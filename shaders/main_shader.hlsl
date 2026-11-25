@@ -23,10 +23,9 @@ float distanceMultiplier(float distance, float intensity) {
     return multiplier * multiplier;
 }
 
-// Obviously very inefficient (storing flags as uints instead of bits), but for just toying around it's not a big deal
 struct VSOutput {
-    float4 pos : SV_POSITION;                       // Vertex position
-    float4 normal : NORMAL0;                        // Vertex normal
+    float4 pos : SV_POSITION;
+    float4 normal : NORMAL0;
     float2 UV: TEXCOORD0;
     float4 cameraPos : CAMERA_POS;
     float4 fragPos : FRAG_POS;
@@ -47,7 +46,6 @@ VSOutput VSMain(VSInput input, [[vk::builtin("DrawIndex")]] uint gl_DrawIDARB : 
 
     // First, check if we actually need to draw anything
     // for entities without an active draw component, drawIndex will be of a special value
-
     if (vertexConstants.drawIndex == UINT32_MAX) {
         output.drawing = false;
         return output;
@@ -86,8 +84,7 @@ VSOutput VSMain(VSInput input, [[vk::builtin("DrawIndex")]] uint gl_DrawIDARB : 
     // Move normal into world space
     // Don't need to do inverse-transpose or similar corrections because we
     // currently do not apply non-uniform scaling or shearing transforms
-    output.normal = normalize(mul(modelMatrix, float4(input.inNormal, 0.0)));   // Note: can also normalize by dividing by the scale factor
-//    output.normal = mul(modelMatrix, float4(input.inNormal, 0.0)) / instanceTransformData.scale.x;
+    output.normal = normalize(mul(modelMatrix, float4(input.inNormal, 0.0)));
     output.UV = input.inUV;
 
     // Camera pos is already in world space - no transformations needed
@@ -112,7 +109,6 @@ float4 noLighting(float4 color) {
     return color;
 }
 
-// Implementation of Gooch lighting that supports more than one light source
 float3 goochMultiLight(
     uint lightCount,
     uint64_t lightAddress, uint64_t transformAddress,
@@ -149,7 +145,6 @@ float3 goochMultiLight(
     return outColor;
 }
 
-// Implementation of Phong lighting that supports more than one light source
 float3 phongMultilight(
     uint lightCount,
     uint64_t lightAddress, uint64_t transformAddress,

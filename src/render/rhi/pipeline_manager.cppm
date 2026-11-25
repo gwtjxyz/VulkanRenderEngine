@@ -541,8 +541,7 @@ public:
     void setCameraVariables(const glm::vec3 & cameraPos, const glm::mat4 & projectionMatrix, const glm::mat4 & viewMatrix) {
         m_VertexPushConstants.cameraPos = glm::vec4(cameraPos, 1.0f);
         m_VertexPushConstants.projection = projectionMatrix;
-        // Vulkan's Y coordinate is flipped compared to OpenGL
-        // and glm was designed with OpenGL in mind
+        // Vulkan's Y coordinate is flipped compared to OpenGL and glm was designed with OpenGL in mind
         m_VertexPushConstants.projection[1][1] *= -1;
         m_VertexPushConstants.view = viewMatrix;
     }

@@ -141,10 +141,12 @@ public:
         vulkanResourceService->stageAndTransfer(m_CpuBatchBuffer, m_GpuBatchBuffer, m_DrawCommands);
     }
 
-    void executeDrawIndirect(const uint32_t frameIndex) {
+    void executeDrawIndirect(const uint32_t frameIndex) const {
         auto * pipelineManager = PipelineManagerLocator::locate();
         auto & commandBuffer = pipelineManager->getActiveCommandBuffer();
 
+        // If the batch buffer got resized while creating batches, its address might have changed,
+        // so we make sure to keep it up to date here
         pipelineManager->prepareAddressesForFrame(frameIndex);
 
         uint32_t batchOffset = 0;

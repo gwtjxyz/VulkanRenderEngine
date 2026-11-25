@@ -1,6 +1,5 @@
 module;
 
-#include <cassert>
 #include <cstdint>
 
 #ifdef DISABLE_IMPORT_STD
@@ -34,29 +33,6 @@ import device_mapper;
 export import scene_graph_types;
 import bit_flags;
 import vulkan_resource_service;
-
-// Constant values for processing sampler info
-namespace SamplerProperties {
-constexpr int32_t magFilterNearest = 9728;
-constexpr int32_t magFilterLinear = 9829;
-
-constexpr int32_t minFilterNearest = 9728;
-constexpr int32_t minFilterLinear = 9729;
-constexpr int32_t minFilterNearestMipmapNearest = 9984;
-constexpr int32_t minFilterLinearMipmapNearest = 9985;
-constexpr int32_t minFilterNearestMipmapLinear = 9986;
-constexpr int32_t minFilterLinearMipmapLinear = 9987;
-
-constexpr int32_t wrapSClampToEdge = 33071;
-constexpr int32_t wrapSMirroredRepeat = 33648;
-constexpr int32_t wrapSRepeat = 10497;
-constexpr int32_t wrapSDefault = wrapSRepeat;
-
-constexpr int32_t wrapTClampToEdge = 33071;
-constexpr int32_t wrapTMirroredRepeat = 33648;
-constexpr int32_t wrapTRepeat = 10497;
-constexpr int32_t wrapTDefault = wrapTRepeat;
-}
 
 // Minimal number of extensions supported at first
 auto supportedExtensions = fastgltf::Extensions::KHR_materials_pbrSpecularGlossiness;

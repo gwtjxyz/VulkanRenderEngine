@@ -36,11 +36,11 @@ export struct WalledMaze {
 
 export class MazeBuilder {
     using grid_index = uint32_t;
+
 public:
     explicit MazeBuilder(const uint32_t width = 5, const uint32_t height = 5) : m_Width(width), m_Height(height) {
         std::random_device seeder;
         m_Rng.seed(seeder());
-        // m_Rng.seed(0);
     }
 
     void setDimensions(const uint32_t width, const uint32_t height) {
@@ -60,8 +60,8 @@ public:
         }
 
         // Pick a random cell
-        std::uniform_int_distribution<uint32_t> xPicker(0, m_Width-1);
-        std::uniform_int_distribution<uint32_t> yPicker(0, m_Height-1);
+        std::uniform_int_distribution<uint32_t> xPicker(0, m_Width - 1);
+        std::uniform_int_distribution<uint32_t> yPicker(0, m_Height - 1);
         const uint32_t firstX = xPicker(m_Rng), firstY = yPicker(m_Rng);
         // Mark it as part of the maze
         m_Grid.at(gridIndex(firstX, firstY)).type = MazeCellType::Corridor;
@@ -97,10 +97,10 @@ public:
         }
     }
 
+    // This also adds walls to the printout (admittedly in a slightly awkward manner)
     void printMazeToFile() const {
-        std::ofstream mazeFile { pathFromAssetDir("maze.txt"),  std::ios_base::out | std::ios_base::trunc };
+        std::ofstream mazeFile { pathFromAssetDir("maze.txt"), std::ios_base::out | std::ios_base::trunc };
 
-        // TODO figure out how to print characters repeatedly in a more reasonable manner
         mazeFile << "█";
         for (uint32_t i = 0; i < m_Width; ++i) {
             mazeFile << "█";
@@ -145,7 +145,6 @@ public:
                 std::cout << '\n';
                 currentX = 0;
             }
-
         }
 
         std::cout << std::endl;
@@ -260,7 +259,7 @@ private:
 
     std::mt19937 m_Rng;
 
-    // Data structure to hold my maze info
+    // Data structure to hold maze info
     std::vector<MazeCell> m_Grid {};
     std::vector<grid_index> m_Walls {};
 };

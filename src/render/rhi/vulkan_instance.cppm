@@ -387,7 +387,7 @@ private:
         m_GraphicsQueue = vk::raii::Queue(m_Device, m_QueueIndex, 0);
     }
 
-    // TODO use this
+    // TODO actually use this
     [[maybe_unused]] void initAllocator() {
         VmaVulkanFunctions vulkanFunctions = {
             .vkGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(m_Instance.getProcAddr("vkGetInstanceProcAddr")),

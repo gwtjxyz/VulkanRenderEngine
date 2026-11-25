@@ -75,7 +75,7 @@ public:
             throw std::runtime_error("Could not load shader file with path " + absolutePath.string());
         }
 
-        LPCWSTR targetProfile {}, entryPoint {};
+        LPCWSTR targetProfile, entryPoint;
         // Will expand as more shader type support is required
         switch (shaderStage) {
             case HlslShaderStage::VERTEX:
@@ -110,10 +110,11 @@ public:
             L"-spirv"                           // Compile for Vulkan
         };
 
-        DxcBuffer buffer {};
-        buffer.Encoding = DXC_CP_ACP;
-        buffer.Ptr = sourceBlob->GetBufferPointer();
-        buffer.Size = sourceBlob->GetBufferSize();
+        const DxcBuffer buffer = {
+            .Ptr = sourceBlob->GetBufferPointer(),
+            .Size = sourceBlob->GetBufferSize(),
+            .Encoding = DXC_CP_ACP
+        };
 
         CComPtr<IDxcResult> compilationResult { nullptr };
         hres = m_Compiler->Compile(

@@ -150,7 +150,6 @@ public:
         return stagingBuffer;
     }
 
-    // TODO size checks for destination buffer?
     template<typename T>
     void stageAndTransfer(SizedVulkanBufferData & src, SizedVulkanBufferData & dst, std::vector<T> & data) {
         const auto dataSize = data.size() * sizeof(T);
@@ -210,7 +209,7 @@ public:
         vk::Buffer buffer;
         vk::DeviceMemory bufferMemory;
 
-        // Needs transfer src and dst bits because it's supposed to be expandable
+        // Needs transfer src and dst bits because it's supposed to be expandable -> have to be able to copy out of it
         createBuffer(
             bufferSize,
             vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst,
@@ -234,7 +233,7 @@ public:
     }
 
     template <typename T>
-    std::vector<VulkanComputeBufferData> createComputeBuffers(int maxFramesInFlight, std::vector<T> & data) {
+    std::vector<VulkanComputeBufferData> createComputeBuffers(const int maxFramesInFlight, std::vector<T> & data) {
         assert(!data.empty());
 
         std::vector<VulkanComputeBufferData> computeBufferData {};

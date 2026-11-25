@@ -27,6 +27,7 @@ export enum class LightMode : int32_t {
     Gooch = 2
 };
 
+// Minimap cells are also technically "particles" as they use the same layout (ignoring velocity completely)
 export struct Particle {
     glm::vec4 position;
     glm::vec4 color;

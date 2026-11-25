@@ -3,10 +3,15 @@ cmake_minimum_required(VERSION 4.2)
 # Probably not fully correct/comprehensive for now, will update as needed
 # Values pulled from https://github.com/Kitware/CMake/blob/master/Help/dev/experimental.rst
 # with changing the branch/tag to whatever CMake version we have installed
-if(CMAKE_VERSION VERSION_LESS 4.3)
-    set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "d0edc3af-4c50-42ea-a356-e2862fe7a444") # 4.2 (?)
-else()
-    set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "451f2fe2-a8a2-47c3-bc32-94786d8fc91b") # 4.3+
+# From CMake version 4.5 onwards no such flags should be needed
+if( NOT CMAKE_EXPERIMENTAL_CXX_IMPORT_STD )
+    if( ${CMAKE_VERSION} VERSION_GREATER_EQUAL 4.4 )
+        set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD f35a9ac6-8463-4d38-8eec-5d6008153e7d)
+    elseif( ${CMAKE_VERSION} VERSION_GREATER_EQUAL 4.3 )
+        set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD 451f2fe2-a8a2-47c3-bc32-94786d8fc91b)
+    elseif( ${CMAKE_VERSION} VERSION_GREATER_EQUAL 4.2 )
+        set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD d0edc3af-4c50-42ea-a356-e2862fe7a444)
+    endif()
 endif()
 
 set(CMAKE_CXX_SCAN_FOR_MODULES ON)

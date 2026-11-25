@@ -56,9 +56,8 @@ export struct Transform {
 
     // Assuming non-negative scaling
     static Transform fromMatrix(const glm::mat4x4 & mat) {
-        Transform transform {};
+        Transform transform;
 
-        // TODO: check if I'm messing up column- vs row-major adjustments (GLM is column-major)
         // Translation is just the last column of the matrix
         transform.translation.x = mat[3][0];
         transform.translation.y = mat[3][1];
@@ -249,10 +248,9 @@ public:
             m_DeviceMapper->getMaterial(materialDeviceIndex).materialTint = mat.color;
 
             // TODO add support for reusing textures across assets
-            device_index textureIndex = INDEX_UNSET;
             // TODO: for now we assume all textures are sampled the same way, maybe change later?
             if (!mat.texturePath.empty()) {
-                textureIndex = textureManager->load(mat.texturePath, materialDeviceIndex);
+                const device_index textureIndex = textureManager->load(mat.texturePath, materialDeviceIndex);
                 m_DeviceMapper->getMaterial(materialDeviceIndex).textureIndex = textureIndex;
             }
 

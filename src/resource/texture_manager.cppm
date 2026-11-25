@@ -130,6 +130,6 @@ public:
     }
 private:
     const uint32_t m_PlaceholderIndex = 0;
-    const uint32_t m_InitialTextureCount = 20;
+    const uint32_t m_InitialTextureCount = 100;
     std::vector<Texture> m_Textures {};
 };

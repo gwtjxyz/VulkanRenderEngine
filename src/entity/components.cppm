@@ -55,7 +55,7 @@ export struct Mesh {
     bool outOfDate = true;
 };
 
-// TODO finish
+// TODO finish implementing
 export enum class LightType : int32_t {
     // Global light that has a direction from where the light is coming from
     // Position is ignored
