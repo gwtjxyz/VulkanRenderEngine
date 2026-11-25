@@ -21,12 +21,15 @@ export module platform;
 import std;
 #endif
 
-const std::string PROJECT_DIR = "VulkanRenderEngine"; // TODO un-hardcode?
+#define ENGINE_STRING(x) #x
+#define ENGINE_XSTRING(x) ENGINE_STRING(x)
+
+const std::string PROJECT_DIR = ENGINE_XSTRING(ENGINE_PROJECT_DIR);
 
 export std::filesystem::path pathFromProjectDir(const std::string & relativePath) {
     auto currentPath = std::filesystem::current_path();
     const auto projectDirPath = std::filesystem::path(PROJECT_DIR);
-    while (currentPath.filename() != projectDirPath) {
+    while (currentPath.filename() != projectDirPath.filename()) {
         assert(currentPath != currentPath.parent_path());
         currentPath = currentPath.parent_path();
     }

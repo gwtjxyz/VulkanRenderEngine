@@ -210,7 +210,7 @@ target_sources(VulkanRenderEngine PUBLIC
         src/render/rhi/descriptor_manager.cppm src/render/rhi/draw_executor.cppm
 )
 
-target_compile_definitions(VulkanRenderEngine PRIVATE USE_CPP20_MODULES=1)
+target_compile_definitions(VulkanRenderEngine PRIVATE USE_CPP20_MODULES=1 ENGINE_PROJECT_DIR=${CMAKE_SOURCE_DIR})
 target_include_directories(VulkanRenderEngine PRIVATE src)
 
 target_include_directories(VulkanRenderEngine PRIVATE BEFORE ${Vulkan_INCLUDE_DIR})
