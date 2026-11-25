@@ -65,7 +65,19 @@ static void checkVkResult(VkResult err) {
 
 export class RenderEngine {
 public:
-    void run(const std::string & appName) {
+    void run(const std::string & appName, const int mazeWidth, const int mazeHeight) {
+        if (mazeWidth > 5) {
+            m_MazeWidth = mazeWidth;
+        } else {
+            m_MazeWidth = MAZE_WIDTH;
+        }
+
+        if (mazeHeight > 5) {
+            m_MazeHeight = mazeHeight;
+        } else {
+            m_MazeHeight = MAZE_HEIGHT;
+        }
+
         initServices();
         initWindow(appName);
         initVulkan();
@@ -492,7 +504,8 @@ private:
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 1.0f, 1.0f, 1.0f));
         ImGui::Text("'MAZE_WIDTH' and 'MAZE_HEIGHT'");
         ImGui::PopStyleColor();
-        ImGui::Text("parameters inside constants.cppm.");
+        ImGui::Text("parameters inside constants.cppm, or supply the width");
+        ImGui::Text("and height via command line arguments.");
         ImGui::Spacing();
 
         if (ImGui::CollapsingHeader("Shader Controls", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -949,7 +962,7 @@ private:
     }
 
     void loadEntities() {
-        m_EntitySystem.setupWorld(m_AssetManager, MAZE_WIDTH, MAZE_HEIGHT);
+        m_EntitySystem.setupWorld(m_AssetManager, m_MazeWidth, m_MazeHeight);
         auto & minimap = m_EntitySystem.getMinimapDisplay();
         m_MinimapBuffer = m_VulkanResourceService->createVulkanBuffer(
             minimap.size() * sizeof(Particle),
@@ -1244,6 +1257,9 @@ private:
     float m_DeltaTime = 0.0f;
     float m_FrameTimeMs = 0.0f;
     uint32_t m_Fps = 0;
+
+    uint32_t m_MazeWidth = 0;
+    uint32_t m_MazeHeight = 0;
 
     // Dynamic shader data
     LightMode m_LightMode = LightMode::Phong;
